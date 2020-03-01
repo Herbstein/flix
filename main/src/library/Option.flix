@@ -273,6 +273,11 @@ namespace Option {
         case Some(v) => f(v)
     }
 
+    pub def choose(l: Option[a], r: Option[a]): Option[a] = match l {
+        case None => r
+        case Some(v) => Some(v)
+    }
+
     ///
     /// Applies the function in `o1` to the value in `o2`.
     ///
