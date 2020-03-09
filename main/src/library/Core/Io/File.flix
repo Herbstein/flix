@@ -42,15 +42,12 @@ namespace Core/Io/File {
     }
 
     pub def add(p: Path, s: String): Path & Impure = {
-        import java.io.File.toPath();
-        import java.nio.file.Path.resolve(String);
-        import java.nio.file.Path.toFile();
-        import java.nio.file.Path.normalize();
+        import java.io.File.toString();
 
         let Path(javaFile) = p;
-        let path = javaFile.toPath();
-        let combined = path.resolve(s).normalize();
-        Path(combined.toFile())
+        let path = javaFile.toString();
+        let combined = path + "/" + s;
+        new(combined)
     }
 
     pub def workingDirectory(): Result[Path, IOError] & Impure = tryWithCatch(_ -> {
