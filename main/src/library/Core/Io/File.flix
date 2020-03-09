@@ -56,6 +56,12 @@ namespace Core/Io/File {
         Path(javaFile.getAbsoluteFile())
     })
 
+    pub def mkdirs(p: Path): Result[Bool, IOError] & Impure = tryWithCatch(_ -> {
+        import java.io.File.mkdirs();
+        let Path(javaFile) = p;
+        javaFile.mkdirs()
+    })
+
     ///
     /// Returns `true` if the given file `f` exists.
     ///
