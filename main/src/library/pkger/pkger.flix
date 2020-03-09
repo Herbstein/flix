@@ -35,22 +35,45 @@ pub def removeDependency(self: Package, package: String): Package = ???
 // Resolve dependency tree and create a list of all dependencies and their transitive dependencies
 pub def lockPackage(self: Package): List[LockedPackage] = ???
 
+def _newDirectory(p: Path): Unit = ???
+
 // Create a new package. Everything but the name of the package can be populated with sensible defaults from the environment
 pub def initPackage(name: String): /* Package */ Result[Bool, Error] & Impure = {
     let getProjectDir = base -> Path.add(base, name);
 
-    let flatMap = Result.flatMap;
-    let mapErr = Result.mapErr;
-    let map = Result.map;
+    let getBuildDir = (base) -> Path.add(getProjectDir(base), "build");
+    let getSourceDir = (base) -> Path.add(getProjectDir(base), "src");
+    let getTestDir = (base) -> Path.add(getProjectDir(base), "test");
+
+    let getPackageFile = (base) -> Path.add(getProjectDir(base), "package.sn");
+    let getHistoryFile = (base) -> Path.add(getProjectDir(base), "HISTORY.md");
+    let getLicenseFile = (base) -> Path.add(getProjectDir(base), "LICENSE.md");
+    let getReadmeFile = (base) -> Path.add(getProjectDir(base), "README.md");
+
+    let getMainSourceFile = (base) -> Path.add(getSourceDir(base), "Main.flix");
+    let getMainTestFile = (base) -> Path.add(getTestDir(base), "TestMain.flix");
 
     let workingDir = Path.workingDirectory();
-    let projectDir = map(d -> getProjectDir(d), workingDir);
-    let projectDirExists = flatMap(Path.exists, projectDir);
-    let mapErred = mapErr(_ -> GenericIoError, projectDirExists);
 
-    // let flattened = flatMap((p) -> projectDir as & Impure, workingDirIsDir);
+    let files = Array.toList([getPackageFile, getHistoryFile, getLicenseFile, getReadmeFile, getMainSourceFile, getMainTestFile]);
+    let dirs = Array.toList([getBuildDir, getSourceDir, getTestDir]);
 
-    flatMap(b -> if (!b) Ok(b) else {Err(ProjectDirExists) as & Impure}, mapErred)
+    let combined: List[Path -> Path] = List.flatten(Array.toList([files, dirs]));
+    let _pathExists = List.find(f -> {
+        let dir = Result.map(f, workingDir);
+        match Result.flatMap(Path.exists, dir) {
+            case Ok(exists) => exists
+            case _ => false
+        }
+    }, combined);
+
+    let _test = List.map(f -> {
+        let dir = Result.map(f, workingDir);
+        Result.flatMap(Path.mkdirs, dir)
+    }, dirs);
+
+
+    Result.mapErr(_ -> GenericIoError, Result.map(getSourceDir, workingDir))
 }
 
 pub enum Error {
@@ -58,6 +81,4 @@ pub enum Error {
     case GenericIoError
 }
 
-def const(a: a): b -> a = _ -> a
-
-pub def main(): Result[Bool, Error] & Impure = initPackage("test")
+pub def main(): Result[Path, ErrorFull] & Impure = initPackage("package_test")
