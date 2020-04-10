@@ -1,7 +1,9 @@
 namespace ParseToml {
     type alias Parser[a] = Parser2.Parser[a]
 
-    type alias ParsedToml = Map[String, InnerToml]
+    type alias ParsedToml = Map[List[Char], InnerToml]
+
+    type alias TomlPath = List[List[Char]]
 
     pub enum InnerToml {
         case MapVal(ParsedToml),
@@ -13,29 +15,164 @@ namespace ParseToml {
         case IntVal(Int)
     }
 
+    pub def serialize(input: ParsedToml): String = Map.foldWithKey(
+        initial -> k -> v -> {
+            initial + Char.toString('"')
+                    + List.toString(k)
+                    + Char.toString('"')
+                    + " = "
+                    + internalSerialize(v)
+                    + Char.toString('\n')
+        },
+        "",
+        input
+    )
 
-    pub def parse(input: List[Char]): Option[ParsedToml] = {
-        use Parser2.fold;
-
-        fold(parseKeyValue(), Map.empty(), m -> (k, v) -> Map.insert(k, v, m))
+    def internalSerialize(input: InnerToml): String = match input {
+        case StringVal(s) => Char.toString('"') + s + Char.toString('"')
+        case _ => ???
     }
 
 
-    def parseKeyValue(): Parser[(List[Char], InnerToml)] = {
+    pub def parse(input: List[Char]): Option[ParsedToml] = {
+        use Parser2.{map, fold, tag, char, takeWhile};
+
+        let parser: Parser[Option[(TomlPath, ParsedToml)]] = {
+            let func: Parser[((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)]] = parseTomlLine();
+            let initial: Option[(TomlPath, ParsedToml)] = Some((Nil, Map.empty()));
+            let apply:
+                Option[(TomlPath, ParsedToml)] ->
+                (((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)])->
+                Option[(TomlPath, ParsedToml)] =
+                    ((t: Option[(TomlPath, ParsedToml)]) ->
+                    (f: (((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)])) ->
+                    (Option.flatMap(f, t): Option[(TomlPath, ParsedToml)]));
+            fold(
+                func,
+                initial,
+                apply
+            )
+        };
+
+        Option.flatMap(t -> {
+            let (_, parsedToml) = t;
+            parsedToml
+        }, input.parser())
+    }
+
+    /**
+     * This is a hack to be able to parse dictionaries (`[*key*]`) and array of
+     * of tables (`[[*key*]]`). It might be better to start by parsing
+     * to a format where that kind of path changes was part of the format,
+     * rather than directly parsing it to the final map.
+     */
+    def parseTomlLine(): Parser[((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)]] = ???/*{
+        use Parser2.{map, or};
+        parseKeyValue().map(input -> {
+            let (k, v) = input;
+            let f = tuple -> {
+                let (path, oldParsedToml) = tuple;
+                Option.map(
+                    u -> (path, u),
+                    updateParsedToml(
+                        oldParsedToml,
+                        path,
+                        internalMap -> Some(Map.insert(k, v, internalMap))
+                    )
+                )
+            };
+            f
+        }) `or` parseDictionaryContext().map(t -> {
+            t2 -> {
+                ???
+            }
+        }) `or` parseArrayContext().map(_ -> {
+            ???
+        }) `or` parseWhiteLine().map(_ -> {
+            t -> t
+        })
+    }*/
+
+    def updateParsedToml(
+        pt: ParsedToml,
+        tp: TomlPath,
+        f: ParsedToml -> Option[ParsedToml]
+    ): Option[ParsedToml] = match tp {
+        case Nil => pt.f()
+        case x :: xs => match Map.get(x, pt) {
+            case Some(v) => Option.map(
+                u -> Map.update(_ -> Some(u), x, pt),
+                updateInnerToml(v, xs, f)
+            )
+            case None => Option.map(
+                u -> Map.insert(x, MapVal(u), pt),
+                updateParsedToml(Map.empty(), xs, f)
+            )
+        }
+    }
+
+    def updateInnerToml(
+        toml: InnerToml,
+        tp: TomlPath,
+        f: ParsedToml -> Option[ParsedToml]
+    ): Option[InnerToml] = match tp {
+        case Nil => match toml {
+            case MapVal(pt) => Option.map(x -> MapVal(x), pt.f())
+            case _ => None
+        } 
+        case xs => match toml {
+            case MapVal(pt) => Option.map(x -> MapVal(x), updateParsedToml(pt, xs, f))
+            case ArrayTableVal(l) => Option.map(x -> ArrayTableVal(x :: l), updateParsedToml(Map.empty(), xs, f))
+            case _ => None
+        }
+    }
+
+    def parseWhiteLine(): Parser[()] = {
+        use Parser2.{and, map};
+        (ws() `and` newLine())
+            .map(_ -> ())
+    }
+
+    def parseDictionaryContext(): Parser[List[List[Char]]] = {
+        use Parser2.{delimit, tag};
+        delimit(tag('['), parseKeys(), tag(']'))
+    }
+
+    def parseArrayContext(): Parser[List[List[Char]]] = {
+        use Parser2.{delimit, tag, and};
+        delimit(tag('[') `and` tag('['), parseKeys(), tag(']') `and` tag(']'))
+    }
+
+    pub def parseKeyValue(): Parser[(List[Char], InnerToml)] = {
         use Parser2.{and, tag, map, then};
+        //Console.printLine("parseKeyValue");
+
         parseKey() `and` (ws() `and` tag('=') `and` ws()).then(_ -> parseValue())
     }
 
-    def parseKey(): Parser[List[Char]] = {
+    def parseKeys(): Parser[List[List[Char]]] =
+        use Parser2.{and, tag, takeWhile, map};
+    (parseKey() `and` takeWhile(
+        (ws() `and` tag('.') `and` ws() `and` parseKey())
+            .map(t -> {
+                let (_, k) = t;
+                k
+            })
+    )).map(t -> {
+        let (lhs, rhs) = t;
+        lhs :: rhs
+    })
+
+    pub def parseKey(): Parser[List[Char]] = {
         use Parser2.or;
 
         parseBareKey() `or` parseLiteralString() `or` parseBasicString()
     }
 
-    def parseValue(): Parser[InnerToml] = {
+    pub def parseValue(): Parser[InnerToml] = {
         use Parser2.map;
 
-        parseString().map(StringVal)
+        parseString().map(List.toString).map(StringVal)
     }
 
     def parseBareKey(): Parser[List[Char]] = {
@@ -64,8 +201,9 @@ namespace ParseToml {
         delimit(quote, takeWhile(not(quote).then(() -> char())), quote)
     }
 
-    def parseBasicString(): Parser[List[Char]] = {
+    pub def parseBasicString(): Parser[List[Char]] = {
         use Parser2.{tag, takeWhile, delimit};
+
         delimit(tag('"'), takeWhile(parseEscapeChar()), tag('"'))
     }
 
@@ -101,8 +239,16 @@ namespace ParseToml {
             case '\\' :: ys => Some((ys, '\\'))
             case _ => None
         }
+        case '"' :: xs => None
         case x :: xs => Some((xs, x))
         case Nil => None
+    }
+
+    def newLine(): Parser[()] = {
+        use Parser2.{char, filter, or, and, map};
+        (char().filter(isCR) `and` char().filter(isLF))
+            .map(_ -> ())
+        `or` char().filter(isLF).map(_ -> ())
     }
 
     def ws(): Parser[()] = {
@@ -113,4 +259,49 @@ namespace ParseToml {
     def isCR(c: Char): Bool = c == Char.fromInt32(13)
 
     def isLF(c: Char): Bool = c == Char.fromInt32(10)
+
+    namespace Test {
+        def ppBool(b: Bool): String = match b {
+            case true => "true"
+            case false => "false"
+        }
+
+
+        def test(name: String, f: () -> Bool & Impure): Bool & Impure = {
+            Console.print("Testing ::: ");
+            Console.print(name);
+            Console.print(": ");
+            let res = f();
+            Console.printLine(ppBool(res));
+            res
+        }
+
+        @test
+        def simpleTest(): Bool & Impure = {
+            use ParseToml.{parse, InnerToml, serialize};
+
+            let parsed = parse('a' :: ' ' :: '=' :: ' ' :: '"' :: 'b' :: '"' :: Nil);
+            match parsed {
+                case None => {
+                    Console.printLine(
+                        "Fuck, shit, fuck, hvad er det her for noget lort?!?!?!?!?"
+                    );
+                    false
+                }
+                case Some(outerToml) => {
+                    Console.printLine(outerToml.serialize());
+                    match Map.get(String.toList("a"), outerToml) {
+                        case None => {false}
+                        case Some(innerToml) => match innerToml {
+                            case InnerToml.StringVal(s) => s == "b"
+                            case _ => {
+                                Console.printLine(outerToml.serialize());
+                                false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

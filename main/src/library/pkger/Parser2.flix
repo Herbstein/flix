@@ -35,7 +35,7 @@ namespace Parser2 {
     ): (List[Char], List[a]) = match input.p() {
         case Some((xs, v)) => {
             let (ys, u) = xs.takeWhileInternal(p);
-            (ys, v::u)
+            (ys, v :: u)
         }
         case None => (input, Nil)
     }
@@ -46,13 +46,33 @@ namespace Parser2 {
         f: b -> a -> b
     ): Parser[b] = input -> Some(foldInternal(p, input, initial, f))
 
+    /*pub def parse(input: List[Char]): Option[ParsedToml] = {
+        use Parser2.{map, fold, tag, char, takeWhile};
+
+        let parser = fold(
+            parseTomlLine(),
+            (Nil, Map.empty()),
+            t -> f -> t.f()
+        )
+        .map(t -> {
+            let (_, m) = t;
+            m
+        });
+
+        match parser(input) {
+            case Some((_, parsedToml)) => Some(parsedToml)
+            case None => ???
+        }
+    }*/
+
     def foldInternal[a, b](
         p: Parser[a],
         input: List[Char],
         initial: b,
         f: b -> a -> b
+        // (List[_], Map[k, v]) -> a -> (List[_], Map[k, v])
     ): (List[Char], b) = match input.p() {
-        case Some((xs, v)) => p.foldInternal(xs, v.f(initial), f)
+        case Some((xs, v)) => foldInternal(p, xs, f(initial, v), f)
         case None => (input, initial)
     }
 
