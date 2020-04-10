@@ -1,7 +1,7 @@
 namespace ParseToml {
     type alias Parser[a] = Parser2.Parser[a]
 
-    type alias ParsedToml = Map[String, InnerToml]
+    type alias ParsedToml = Map[List[Char], InnerToml]
 
     pub enum InnerToml {
         case MapVal(ParsedToml),
@@ -13,15 +13,31 @@ namespace ParseToml {
         case IntVal(Int)
     }
 
+    def newFold(
+        p: Parser[(List[Char], InnerToml)],
+        initial: ParsedToml,
+        f: ParsedToml -> (List[Char], InnerToml) -> ParsedToml
+    ): Parser[ParsedToml] = Parser2.fold(p, initial, f)
 
-    pub def parse(input: List[Char]): Option[ParsedToml] = {
-        use Parser2.fold;
+    /*pub def parse(input: List[Char]): Option[ParsedToml] = {
+        use Parser2.{fold, tag, char, takeWhile};
 
-        fold(parseKeyValue(), Map.empty(), m -> (k, v) -> Map.insert(k, v, m))
-    }
+        let parser = takeWhile(char());
+        //let parser = parseKeyValue();
+        let parser = newFold(
+            char(),
+            Map.empty(),
+            _ -> _ -> ???
+        );
+        match parser(input) {
+            case Some((_, parsedToml)) => Some(parsedToml)
+            case None => ???
+        }
+        ???
+    }*/
 
 
-    def parseKeyValue(): Parser[(List[Char], InnerToml)] = {
+    pub def parseKeyValue(): Parser[(List[Char], InnerToml)] = {
         use Parser2.{and, tag, map, then};
         parseKey() `and` (ws() `and` tag('=') `and` ws()).then(_ -> parseValue())
     }
