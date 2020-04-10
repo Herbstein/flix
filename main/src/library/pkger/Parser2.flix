@@ -52,7 +52,7 @@ namespace Parser2 {
         initial: b,
         f: b -> a -> b
     ): (List[Char], b) = match input.p() {
-        case Some((xs, v)) => p.foldInternal(xs, v.f(initial), f)
+        case Some((xs, v)) => foldInternal(p, xs, f(v, initial), f)
         case None => (input, initial)
     }
 
