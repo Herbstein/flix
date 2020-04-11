@@ -3,6 +3,27 @@ namespace ParseToml {
 
     type alias ParsedToml = Map[List[Char], InnerToml]
 
+    type alias TomlPath = List[List[Char]] //# bullshit
+
+    pub def serialize(input: ParsedToml): String = Map.foldWithKey(
+        initial -> k -> v -> {
+            initial + Char.toString('"')
+                    + List.toString(k)
+                    + Char.toString('"')
+                    + " = "
+                    + internalSerialize(v)
+                    + Char.toString('\n')
+        },
+        "",
+        input
+    )
+
+    def internalSerialize(input: InnerToml): String = match input {
+        case StringVal(s) => Char.toString('"') + s + Char.toString('"')
+        case _ => ???
+    }
+
+
     pub enum InnerToml {
         case MapVal(ParsedToml),
         case ArrayTableVal(List[ParsedToml]),
@@ -13,45 +34,54 @@ namespace ParseToml {
         case IntVal(Int)
     }
 
-    def newFold(
-        p: Parser[(List[Char], InnerToml)],
-        initial: ParsedToml,
-        f: ParsedToml -> (List[Char], InnerToml) -> ParsedToml
-    ): Parser[ParsedToml] = Parser2.fold(p, initial, f)
+    pub def parse(input: List[Char]): Option[ParsedToml] = {
+        use Parser2.{map, fold, tag, char, takeWhile};
 
-    /*pub def parse(input: List[Char]): Option[ParsedToml] = {
-        use Parser2.{fold, tag, char, takeWhile};
+        let parser = fold(
+            parseTomlLine(),
+            (Nil, Map.empty()),
+            t -> f -> t.f()
+        )
+        .map(t -> {
+            let (_, m) = t;
+            m
+        });
 
-        let parser = takeWhile(char());
-        //let parser = parseKeyValue();
-        let parser = newFold(
-            char(),
-            Map.empty(),
-            _ -> _ -> ???
-        );
         match parser(input) {
             case Some((_, parsedToml)) => Some(parsedToml)
             case None => ???
         }
-        ???
-    }*/
+    }
 
+    def parseTomlLine(): Parser[(TomlPath, ParsedToml) -> (TomlPath, ParsedToml)] = {
+        use Parser2.map;
+        parseKeyValue().map(input -> {
+            let (k, v) = input;
+            let f = tuple -> {
+                let (p, m) = tuple;
+                (p, Map.insert(k, v, m))
+            };
+            f
+        })
+    }
 
     pub def parseKeyValue(): Parser[(List[Char], InnerToml)] = {
         use Parser2.{and, tag, map, then};
+        //Console.printLine("parseKeyValue");
+
         parseKey() `and` (ws() `and` tag('=') `and` ws()).then(_ -> parseValue())
     }
 
-    def parseKey(): Parser[List[Char]] = {
+    pub def parseKey(): Parser[List[Char]] = {
         use Parser2.or;
 
         parseBareKey() `or` parseLiteralString() `or` parseBasicString()
     }
 
-    def parseValue(): Parser[InnerToml] = {
+    pub def parseValue(): Parser[InnerToml] = {
         use Parser2.map;
 
-        parseString().map(StringVal)
+        parseString().map(List.toString).map(StringVal)
     }
 
     def parseBareKey(): Parser[List[Char]] = {
@@ -80,8 +110,9 @@ namespace ParseToml {
         delimit(quote, takeWhile(not(quote).then(() -> char())), quote)
     }
 
-    def parseBasicString(): Parser[List[Char]] = {
+    pub def parseBasicString(): Parser[List[Char]] = {
         use Parser2.{tag, takeWhile, delimit};
+
         delimit(tag('"'), takeWhile(parseEscapeChar()), tag('"'))
     }
 
@@ -117,6 +148,7 @@ namespace ParseToml {
             case '\\' :: ys => Some((ys, '\\'))
             case _ => None
         }
+        case '"' :: xs => None
         case x :: xs => Some((xs, x))
         case Nil => None
     }
@@ -129,4 +161,54 @@ namespace ParseToml {
     def isCR(c: Char): Bool = c == Char.fromInt32(13)
 
     def isLF(c: Char): Bool = c == Char.fromInt32(10)
+
+    namespace Test {
+        def ppBool(b: Bool): String = match b {
+            case true => "true"
+            case false => "false"
+        }
+
+
+        def test(name: String, f: () -> Bool & Impure): Bool & Impure = {
+            Console.print("Testing ::: ");
+            Console.print(name);
+            Console.print(": ");
+            let res = f();
+            Console.printLine(ppBool(res));
+            res
+        }
+
+        pub def allTests(): Bool & Impure = {
+            // Bulder bulder
+            let first = test("Simple test", simpleTest);
+            first
+        }
+
+        def simpleTest(): Bool & Impure = {
+            use ParseToml.{parse, InnerToml, serialize};
+
+            let parsed = parse('a' :: ' ' :: '=' :: ' ' :: '"' :: 'b' :: '"' :: Nil);
+            match parsed {
+                case None => {
+                    Console.printLine(
+                        "Fuck, shit, fuck, hvad er det her for noget lort?!?!?!?!?"
+                    );
+                    false
+                }
+                case Some(outerToml) => {
+                    Console.printLine(outerToml.serialize());
+                    match Map.get(String.toList("a"), outerToml) {
+                        case None => {false}
+                        case Some(innerToml) => match innerToml {
+                            case InnerToml.StringVal(s) => s == "b"
+                            case _ => {
+                                Console.printLine(outerToml.serialize());
+                                false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
