@@ -4,4 +4,7 @@ pub def main(): Result[Path, Manifest.InitError] & Impure = Manifest.initPackage
     case None => false
 }
 
-// pub def main(): Bool & Impure = Test.runAllTests()
+pub def main(): Bool & Impure = {
+    SemVer/Test.allTests() &&
+    ParseToml/Test.allTests()
+}

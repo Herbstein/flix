@@ -35,7 +35,7 @@ namespace Parser2 {
     ): (List[Char], List[a]) = match input.p() {
         case Some((xs, v)) => {
             let (ys, u) = xs.takeWhileInternal(p);
-            (ys, v::u)
+            (ys, v :: u)
         }
         case None => (input, Nil)
     }
@@ -52,7 +52,7 @@ namespace Parser2 {
         initial: b,
         f: b -> a -> b
     ): (List[Char], b) = match input.p() {
-        case Some((xs, v)) => foldInternal(p, xs, f(v, initial), f)
+        case Some((xs, v)) => foldInternal(p, xs, f(initial, v), f)
         case None => (input, initial)
     }
 
