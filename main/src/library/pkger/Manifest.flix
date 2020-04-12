@@ -1,7 +1,4 @@
-use Result.flatMap;
-use Pkger/SemVer.SemVer;
-
-namespace Pkger/Manifest {
+namespace Manifest {
     pub type alias Author = { name: String
                             , email: String
                             }
@@ -11,7 +8,7 @@ namespace Pkger/Manifest {
                              , authors: List[Author]
                              , description: String
                              , license: String
-                             , depends: Map[String, SemVer]
+                             , depends: Map[String, SemVer.SemVer]
                              , home: Option[String]
                              }
 
@@ -120,8 +117,8 @@ namespace Pkger/Manifest {
     }
 
     // Create a new package. Everything but the name of the package can be populated with sensible defaults from the environment
-    pub def initPackage(name: String): /* Package */ Result[Core/Io/File.File, InitError] & Impure = {
-        use Core/Io/File.add;
+    pub def initPackage(name: String): /* Package */ Result[Path, InitError] & Impure = {
+        use Path.add;
 
         let getProjectDir = (base) -> base.add(name);
 
@@ -154,8 +151,9 @@ namespace Pkger/Manifest {
             |> Array.toList
             |> List.flatten
             |> List.map(f -> {
-                    let* path = Result.map(f, workingDir);
-                    let* exists = Core/Io/File.exists(path);
+                    use Result.flatMap;
+                    let* path: Path = Result.map(f, workingDir);
+                    let* exists: Bool = Path.exists(path);
                     Ok((path, exists))
                 })
             |> List.filterMap(Result.toOption)
@@ -166,7 +164,7 @@ namespace Pkger/Manifest {
                 // Create all directories required for the package
                 List.map(f -> {
                     let dir = Result.map(f, workingDir);
-                    Result.flatMap(Core/Io/File.mkdirs, dir)
+                    Result.flatMap(Path.mkdirs, dir)
                 }, dirs);
 
                 let quote = (s) -> Char.toString('"') + s + Char.toString('"');
@@ -207,6 +205,79 @@ namespace Pkger/Manifest {
                 Result.mapErr(_ -> GenericIoError, Result.map(getSourceDir, workingDir))
             }
             case Some((d, _)) => Err(PathAlreadyExists(d))
+        }
+    }
+
+    pub enum InitError {
+        case PathAlreadyExists(Path)
+        case GenericIoError
+    }
+
+    namespace Test {
+        def transitiveContains(mx: Map[String, SemVer.SemVer], m: (String, SemVer.SemVer)): Bool = {
+            Map.exists((k, v) -> match m { case (p, s) => p == k && s == v }, mx)
+        }
+
+        def containedIn(xs: List[Manifest.LockedPackage], package: Manifest.LockedPackage): Bool = {
+            use Manifest.LockedPackage;
+
+            let transitive = (p) -> Map.forall((k, v) -> transitiveContains(p.transitive, (k, v)), package.transitive);
+
+            List.exists(p -> {
+                p.name == package.name
+                    && p.version == package.version
+                    && transitive(p)
+            }, xs)
+        }
+
+        def testLocking(): Bool & Impure = {
+            use Test.test;
+            use Manifest.{LockedPackage, lockPackage, newLockedPackage};
+            use Map.{empty, insert};
+
+            let package = { name = "some_package"
+                          , version = (0, 1, 0)
+                          , authors = {name = "Some Guy", email = "test@test.com"} :: Nil
+                          , description = "Some package"
+                          // This could be mandatory
+                          , license = "MIT"
+                          // Mapping package dependency names to the semver pattern
+                          , depends = empty() |> insert("package_one", (0, 1, 0))
+                          , home = None
+                          };
+
+            let locked = lockPackage(package);
+
+            let check = newLockedPackage("some_package",  (0,1,0), empty() |> insert("package_one", (0, 1, 1)))
+                :: newLockedPackage("package_one", (0,1,1), empty())
+                :: Nil;
+
+            let first = test("lockingIsExpected1", () -> List.forall(containedIn(locked), check));
+
+            let package2 = {
+                name = "another_package",
+                version = (0, 1, 0),
+                authors = {name = "Some Guy", email = "test@test.com"} :: Nil,
+                description = "Some package",
+                license = "MIT",
+                depends = empty() |> insert("package_one", (0, 2, 0)),
+                home = None
+            };
+
+            let locked2 = lockPackage(package2);
+
+            let check2 = newLockedPackage("another_package", (0, 1, 0), empty() |> insert("package_one", (0, 2, 1)) |> insert("package_two", (0, 1, 1)))
+                :: newLockedPackage("package_one", (0, 2, 1), empty() |> insert("package_two", (0, 1, 1)))
+                :: newLockedPackage("package_two", (0, 1, 1), empty())
+                :: Nil;
+
+            let second = test("lockingIsExpected2", () -> List.forall(containedIn(locked2), check2));
+
+            first && second
+        }
+
+        pub def allTests(): Bool & Impure = {
+            testLocking()
         }
     }
 }
