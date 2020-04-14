@@ -40,7 +40,7 @@ namespace ParseToml {
         let parser = fold(
             parseTomlLine(),
             (Nil, Map.empty()),
-            t -> f -> t.f()
+            t -> (f -> t.f())
         )
         .map(t -> {
             let (_, m) = t;
@@ -53,7 +53,7 @@ namespace ParseToml {
         }
     }
 
-    def parseTomlLine(): Parser[(TomlPath, ParsedToml) -> (TomlPath, ParsedToml)] = {
+    def parseTomlLine(): Parser[((TomlPath, ParsedToml)) -> (TomlPath, ParsedToml)] = {
         use Parser2.map;
         parseKeyValue().map(input -> {
             let (k, v) = input;
