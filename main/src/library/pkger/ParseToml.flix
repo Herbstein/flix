@@ -3,7 +3,7 @@ namespace ParseToml {
 
     type alias ParsedToml = Map[List[Char], InnerToml]
 
-    type alias TomlPath = List[List[Char]] //# bullshit
+    type alias TomlPath = List[List[Char]]
 
     pub def serialize(input: ParsedToml): String = Map.foldWithKey(
         initial -> k -> v -> {
@@ -40,7 +40,7 @@ namespace ParseToml {
         let parser = fold(
             parseTomlLine(),
             (Nil, Map.empty()),
-            t -> (f -> t.f())
+            t -> f -> t.f()
         )
         .map(t -> {
             let (_, m) = t;
@@ -54,7 +54,7 @@ namespace ParseToml {
     }
 
     def parseTomlLine(): Parser[((TomlPath, ParsedToml)) -> (TomlPath, ParsedToml)] = {
-        use Parser2.map;
+        use Parser2.{map, or};
         parseKeyValue().map(input -> {
             let (k, v) = input;
             let f = tuple -> {
@@ -63,7 +63,21 @@ namespace ParseToml {
             };
             f
         })
+        .or(parseDictionaryContext())
+        .or(parseArrayContext())
+        .or(parseWhiteLine().map(_ -> {
+            t -> t
+        }))
     }
+
+    def parseWhiteLine(): Parser[()] = {
+        use Parser2.{and, map};
+        (ws() `and` newLine())
+            .map(_ -> ())
+    }
+
+    def parseDictionaryContext(): Parser[List[List[Char]]] = delimit(tag('['), parseKey, tag(']'))
+    def parseArrayContext(): Parser[((TomlPath, ParsedToml)) -> (TomlPath, ParsedToml)] = ???
 
     pub def parseKeyValue(): Parser[(List[Char], InnerToml)] = {
         use Parser2.{and, tag, map, then};
@@ -71,6 +85,14 @@ namespace ParseToml {
 
         parseKey() `and` (ws() `and` tag('=') `and` ws()).then(_ -> parseValue())
     }
+
+    def parseKeys(): Parser[List[List[Char]]] =
+
+    (parseKey() `and` takeWhile(ws() `and` tag('.') `and` ws() `and` parseKey()).map(t -> {
+        let (_, _, _, k) = t;
+        k
+    })
+    )
 
     pub def parseKey(): Parser[List[Char]] = {
         use Parser2.or;
@@ -151,6 +173,13 @@ namespace ParseToml {
         case '"' :: xs => None
         case x :: xs => Some((xs, x))
         case Nil => None
+    }
+
+    def newLine(): Parser[()] = {
+        use Parser2.{char, filter, or, and, map};
+        (char().filter(isCR) `and` char().filter(isLF))
+            .map(_ -> ())
+        `or` char().filter(isLF).map(_ -> ())
     }
 
     def ws(): Parser[()] = {
