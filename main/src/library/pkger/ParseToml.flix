@@ -5,6 +5,16 @@ namespace ParseToml {
 
     type alias TomlPath = List[List[Char]]
 
+    pub enum InnerToml {
+        case MapVal(ParsedToml),
+        case ArrayTableVal(List[ParsedToml]),
+        case StringVal(String),
+        case DateVal(String),
+        case FloatVal(String),
+        case BoolVal(Bool),
+        case IntVal(Int)
+    }
+
     pub def serialize(input: ParsedToml): String = Map.foldWithKey(
         initial -> k -> v -> {
             initial + Char.toString('"')
@@ -23,16 +33,6 @@ namespace ParseToml {
         case _ => ???
     }
 
-
-    pub enum InnerToml {
-        case MapVal(ParsedToml),
-        case ArrayTableVal(List[ParsedToml]),
-        case StringVal(String),
-        case DateVal(String),
-        case FloatVal(String),
-        case BoolVal(Bool),
-        case IntVal(Int)
-    }
 
     pub def parse(input: List[Char]): Option[ParsedToml] = {
         use Parser2.{map, fold, tag, char, takeWhile};
@@ -62,12 +62,44 @@ namespace ParseToml {
                 (p, Map.insert(k, v, m))
             };
             f
-        })
-        .or(parseDictionaryContext())
-        .or(parseArrayContext())
-        .or(parseWhiteLine().map(_ -> {
+        }) `or` parseDictionaryContext().map(t -> {
+            ???
+        }) `or` parseArrayContext().map(_ -> {
+            ???
+        }) `or` parseWhiteLine().map(_ -> {
             t -> t
-        }))
+        })
+    }
+
+    def updateParsedToml(
+        pt: ParsedToml,
+        tp: TomlPath,
+        f: ParsedToml -> Option[ParsedToml]
+    ): Option[ParsedToml] = match tp {
+        case Nil => pt.f()
+        case x :: xs => match Map.get(x, pt) {
+            case Some(v) => ???
+            case None => Option.map(
+                rest -> Map.insert(x, MapVal(rest), pt),
+                updateParsedToml(Map.empty(), xs, f)
+            )
+        }
+    }
+
+    def updateInnerToml(
+        toml: InnerToml,
+        tp: TomlPath,
+        f: ParsedToml -> Option[ParsedToml]
+    ): Option[InnerToml] = match tp {
+        case Nil => match toml {
+            case MapVal(pt) => Option.map(x -> MapVal(x), pt.f())
+            case _ => None
+        } 
+        case xs => match toml {
+            case MapVal(pt) => Option.map(x -> MapVal(x), updateParsedToml(pt, xs, f))
+            case ArrayTableVal(l) => Option.map(x -> ArrayTableVal(x :: l), updateParsedToml(Map.empty(), xs, f))
+            case _ => None
+        }
     }
 
     def parseWhiteLine(): Parser[()] = {
@@ -76,8 +108,15 @@ namespace ParseToml {
             .map(_ -> ())
     }
 
-    def parseDictionaryContext(): Parser[List[List[Char]]] = delimit(tag('['), parseKey, tag(']'))
-    def parseArrayContext(): Parser[((TomlPath, ParsedToml)) -> (TomlPath, ParsedToml)] = ???
+    def parseDictionaryContext(): Parser[List[List[Char]]] = {
+        use Parser2.{delimit, tag};
+        delimit(tag('['), parseKeys(), tag(']'))
+    }
+
+    def parseArrayContext(): Parser[List[List[Char]]] = {
+        use Parser2.{delimit, tag, and};
+        delimit(tag('[') `and` tag('['), parseKeys(), tag(']') `and` tag(']'))
+    }
 
     pub def parseKeyValue(): Parser[(List[Char], InnerToml)] = {
         use Parser2.{and, tag, map, then};
@@ -87,12 +126,17 @@ namespace ParseToml {
     }
 
     def parseKeys(): Parser[List[List[Char]]] =
-
-    (parseKey() `and` takeWhile(ws() `and` tag('.') `and` ws() `and` parseKey()).map(t -> {
-        let (_, _, _, k) = t;
-        k
+        use Parser2.{and, tag, takeWhile, map};
+    (parseKey() `and` takeWhile(
+        (ws() `and` tag('.') `and` ws() `and` parseKey())
+            .map(t -> {
+                let (_, k) = t;
+                k
+            })
+    )).map(t -> {
+        let (lhs, rhs) = t;
+        lhs :: rhs
     })
-    )
 
     pub def parseKey(): Parser[List[Char]] = {
         use Parser2.or;
