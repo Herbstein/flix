@@ -36,6 +36,7 @@ namespace Manifest {
         { depends = removedPackage | self }
     }
 
+    // Duplicated temporarily from TestManifest.flix
     def packageRepository(package: String, version: SemVer.SemVer): Map[SemVer.SemVer, Map[String, SemVer.SemVer]] = {
         use Map.{empty, filterWithKey, getWithDefault, insert};
         use SemVer.{isCompatible, SemVer};
@@ -108,6 +109,11 @@ namespace Manifest {
                )
             |> flattenDependencyTree
             |> List.map(match (package, version, dependencies) -> newLockedPackage(package, version, List.toMap(dependencies)))
+    }
+
+    pub enum InitError {
+        case PathAlreadyExists(Path)
+        case GenericIoError
     }
 
     // Create a new package. Everything but the name of the package can be populated with sensible defaults from the environment
@@ -199,80 +205,6 @@ namespace Manifest {
                 Result.mapErr(_ -> GenericIoError, Result.map(getSourceDir, workingDir))
             }
             case Some((d, _)) => Err(PathAlreadyExists(d))
-        }
-    }
-
-    pub enum InitError {
-        case PathAlreadyExists(Path)
-        case GenericIoError
-    }
-
-    namespace Test {
-        def transitiveContains(mx: Map[String, SemVer.SemVer], m: (String, SemVer.SemVer)): Bool = {
-            Map.exists((k, v) -> match m { case (p, s) => p == k && s == v }, mx)
-        }
-
-        def containedIn(xs: List[Manifest.LockedPackage], package: Manifest.LockedPackage): Bool = {
-            use Manifest.LockedPackage;
-
-            let transitive = (p) -> Map.forall((k, v) -> transitiveContains(p.transitive, (k, v)), package.transitive);
-
-            List.exists(p -> {
-                p.name == package.name
-                    && p.version == package.version
-                    && transitive(p)
-            }, xs)
-        }
-
-        def testLocking(): Bool & Impure = {
-            use Test.test;
-            use Manifest.{LockedPackage, lockPackage, newLockedPackage};
-            use Map.{empty, insert};
-            use SemVer.SemVer;
-
-            let package = { name = "some_package"
-                          , version = SemVer.SemVer(0, 1, 0)
-                          , authors = {name = "Some Guy", email = "test@test.com"} :: Nil
-                          , description = "Some package"
-                          // This could be mandatory
-                          , license = "MIT"
-                          // Mapping package dependency names to the semver pattern
-                          , depends = empty() |> insert("package_one", SemVer.SemVer(0, 1, 0))
-                          , home = None
-                          };
-
-            let locked = lockPackage(package);
-
-            let check = newLockedPackage("some_package",  SemVer.SemVer(0,1,0), empty() |> insert("package_one", SemVer.SemVer(0, 1, 1)))
-                :: newLockedPackage("package_one", SemVer.SemVer(0,1,1), empty())
-                :: Nil;
-
-            let first = test("lockingIsExpected1", () -> List.forall(containedIn(locked), check));
-
-            let package2 = {
-                name = "another_package",
-                version = SemVer.SemVer(0, 1, 0),
-                authors = {name = "Some Guy", email = "test@test.com"} :: Nil,
-                description = "Some package",
-                license = "MIT",
-                depends = empty() |> insert("package_one", SemVer.SemVer(0, 2, 0)),
-                home = None
-            };
-
-            let locked2 = lockPackage(package2);
-
-            let check2 = newLockedPackage("another_package", SemVer.SemVer(0, 1, 0), empty() |> insert("package_one", SemVer.SemVer(0, 2, 1)) |> insert("package_two", SemVer.SemVer(0, 1, 1)))
-                :: newLockedPackage("package_one", SemVer.SemVer(0, 2, 1), empty() |> insert("package_two", SemVer.SemVer(0, 1, 1)))
-                :: newLockedPackage("package_two", SemVer.SemVer(0, 1, 1), empty())
-                :: Nil;
-
-            let second = test("lockingIsExpected2", () -> List.forall(containedIn(locked2), check2));
-
-            first && second
-        }
-
-        pub def allTests(): Bool & Impure = {
-            testLocking()
         }
     }
 }
