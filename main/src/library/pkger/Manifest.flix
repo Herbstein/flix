@@ -18,7 +18,7 @@ namespace Manifest {
                                    , transitive: Map[String, SemVer.SemVer]
                                    }
 
-    def newLockedPackage(name: String, version: SemVer.SemVer, transitive: Map[String, SemVer.SemVer]): LockedPackage = {
+    pub def newLockedPackage(name: String, version: SemVer.SemVer, transitive: Map[String, SemVer.SemVer]): LockedPackage = {
         {name = name, version = version, transitive = transitive}
     }
 
