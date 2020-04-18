@@ -37,39 +37,61 @@ namespace ParseToml {
     pub def parse(input: List[Char]): Option[ParsedToml] = {
         use Parser2.{map, fold, tag, char, takeWhile};
 
-        let parser = fold(
-            parseTomlLine(),
-            (Nil, Map.empty()),
-            t -> f -> t.f()
-        )
-        .map(t -> {
-            let (_, m) = t;
-            m
-        });
+        let parser: Parser[Option[(TomlPath, ParsedToml)]] = {
+            let func: Parser[((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)]] = parseTomlLine();
+            let initial: Option[(TomlPath, ParsedToml)] = Some((Nil, Map.empty()));
+            let apply:
+                Option[(TomlPath, ParsedToml)] ->
+                (((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)])->
+                Option[(TomlPath, ParsedToml)] =
+                    (t: Option[(TomlPath, ParsedToml)]) ->
+                    (f: (((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)])) ->
+                    (Option.flatMap(f, t): Option[(TomlPath, ParsedToml)]);
+            fold(
+                func,
+                initial,
+                apply
+            )
+        };
 
-        match parser(input) {
-            case Some((_, parsedToml)) => Some(parsedToml)
-            case None => ???
-        }
+        Option.flatMap(t -> {
+            let (_, parsedToml) = t;
+            parsedToml
+        }, input.parser())
     }
 
-    def parseTomlLine(): Parser[((TomlPath, ParsedToml)) -> (TomlPath, ParsedToml)] = {
+    /**
+     * This is a hack to be able to parse dictionaries (`[*key*]`) and array of
+     * of tables (`[[*key*]]`). It might be better to start by parsing
+     * to a format where that kind of path changes was part of the format,
+     * rather than directly parsing it to the final map.
+     */
+    def parseTomlLine(): Parser[((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)]] = ???/*{
         use Parser2.{map, or};
         parseKeyValue().map(input -> {
             let (k, v) = input;
             let f = tuple -> {
-                let (p, m) = tuple;
-                (p, Map.insert(k, v, m))
+                let (path, oldParsedToml) = tuple;
+                Option.map(
+                    u -> (path, u),
+                    updateParsedToml(
+                        oldParsedToml,
+                        path,
+                        internalMap -> Some(Map.insert(k, v, internalMap))
+                    )
+                )
             };
             f
         }) `or` parseDictionaryContext().map(t -> {
-            ???
+            t2 -> {
+                ???
+            }
         }) `or` parseArrayContext().map(_ -> {
             ???
         }) `or` parseWhiteLine().map(_ -> {
             t -> t
         })
-    }
+    }*/
 
     def updateParsedToml(
         pt: ParsedToml,
@@ -78,9 +100,12 @@ namespace ParseToml {
     ): Option[ParsedToml] = match tp {
         case Nil => pt.f()
         case x :: xs => match Map.get(x, pt) {
-            case Some(v) => ???
+            case Some(v) => Option.map(
+                u -> Map.update(_ -> Some(u), x, pt),
+                updateInnerToml(v, xs, f)
+            )
             case None => Option.map(
-                rest -> Map.insert(x, MapVal(rest), pt),
+                u -> Map.insert(x, MapVal(u), pt),
                 updateParsedToml(Map.empty(), xs, f)
             )
         }
