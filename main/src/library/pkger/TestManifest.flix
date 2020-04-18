@@ -1,8 +1,9 @@
 use SemVer.SemVer;
-use Manifest.LockedPackage;
+use Manifest.{LockedPackage, lockPackage, newLockedPackage};
+use Map.{empty, insert};
 
 def _packageRepository(package: String, version: SemVer): Map[SemVer, Map[String, SemVer]] = {
-    use Map.{empty, filterWithKey, getWithDefault, insert};
+    use Map.{filterWithKey, getWithDefault};
     use SemVer.isCompatible;
 
     let package_one_versions = empty()
@@ -43,7 +44,46 @@ def containedIn(xs: List[LockedPackage], package: LockedPackage): Bool = {
 pub def checkLock(locked: List[LockedPackage], check: List[LockedPackage]): Bool = List.forall(containedIn(locked), check)
 
 @test
-def xx(): Bool = true
+def smoke01(): Bool = {
+    let package = { name = "some_package"
+                  , version = SemVer.SemVer(0, 1, 0)
+                  , authors = {name = "Some Guy", email = "test@test.com"} :: Nil
+                  , description = "Some package"
+                  , license = "MIT"
+                  , depends = empty() |> insert("package_one", SemVer.SemVer(0, 1, 0))
+                  , home = None
+                  };
+
+    let check = newLockedPackage("some_package",  SemVer.SemVer(0,1,0), empty() |> insert("package_one", SemVer.SemVer(0, 1, 1)))
+        :: newLockedPackage("package_one", SemVer.SemVer(0,1,1), empty())
+        :: Nil;
+
+    let locked = lockPackage(package);
+
+    checkLock(locked, check)
+}
+
+@test
+def smoke02(): Bool = {
+    let package = {
+        name = "another_package",
+        version = SemVer.SemVer(0, 1, 0),
+        authors = {name = "Some Guy", email = "test@test.com"} :: Nil,
+        description = "Some package",
+        license = "MIT",
+        depends = empty() |> insert("package_one", SemVer.SemVer(0, 2, 0)),
+        home = None
+    };
+
+    let locked = lockPackage(package);
+
+    let check = newLockedPackage("another_package", SemVer.SemVer(0, 1, 0), empty() |> insert("package_one", SemVer.SemVer(0, 2, 1)) |> insert("package_two", SemVer.SemVer(0, 1, 1)))
+        :: newLockedPackage("package_one", SemVer.SemVer(0, 2, 1), empty() |> insert("package_two", SemVer.SemVer(0, 1, 1)))
+        :: newLockedPackage("package_two", SemVer.SemVer(0, 1, 1), empty())
+        :: Nil;
+
+    checkLock(locked, check)
+}
 
 /*
 namespace Test {
