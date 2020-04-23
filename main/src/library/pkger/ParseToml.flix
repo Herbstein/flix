@@ -44,9 +44,9 @@ namespace ParseToml {
                 Option[(TomlPath, ParsedToml)] ->
                 (((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)])->
                 Option[(TomlPath, ParsedToml)] =
-                    (t: Option[(TomlPath, ParsedToml)]) ->
+                    ((t: Option[(TomlPath, ParsedToml)]) ->
                     (f: (((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)])) ->
-                    (Option.flatMap(f, t): Option[(TomlPath, ParsedToml)]);
+                    (Option.flatMap(f, t): Option[(TomlPath, ParsedToml)]));
             fold(
                 func,
                 initial,
@@ -276,12 +276,7 @@ namespace ParseToml {
             res
         }
 
-        pub def allTests(): Bool & Impure = {
-            // Bulder bulder
-            let first = test("Simple test", simpleTest);
-            first
-        }
-
+        @test
         def simpleTest(): Bool & Impure = {
             use ParseToml.{parse, InnerToml, serialize};
 
