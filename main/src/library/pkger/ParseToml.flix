@@ -5,9 +5,13 @@ namespace ParseToml {
 
     type alias TomlPath = List[List[Char]]
 
+    type alias ParseError = String
+
+    type alias ParseResult = Result[ParsedToml, ParseError]
+
     pub enum InnerToml {
-        case MapVal(ParsedToml),
-        case ArrayTableVal(List[ParsedToml]),
+        case TableVal(ParsedToml),
+        case ArrayVal(List[ParsedToml]),
         case StringVal(String),
         case DateVal(String),
         case FloatVal(String),
@@ -15,246 +19,129 @@ namespace ParseToml {
         case IntVal(Int)
     }
 
-    pub def serialize(input: ParsedToml): String = Map.foldWithKey(
-        initial -> k -> v -> {
-            initial + Char.toString('"')
-                    + List.toString(k)
-                    + Char.toString('"')
-                    + " = "
-                    + internalSerialize(v)
-                    + Char.toString('\n')
-        },
-        "",
-        input
-    )
-
     def internalSerialize(input: InnerToml): String = match input {
         case StringVal(s) => Char.toString('"') + s + Char.toString('"')
         case _ => ???
     }
 
 
-    pub def parse(input: List[Char]): Option[ParsedToml] = {
-        use Parser2.{map, fold, tag, char, takeWhile};
-
-        let parser: Parser[Option[(TomlPath, ParsedToml)]] = {
-            let func: Parser[((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)]] = parseTomlLine();
-            let initial: Option[(TomlPath, ParsedToml)] = Some((Nil, Map.empty()));
-            let apply:
-                Option[(TomlPath, ParsedToml)] ->
-                (((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)])->
-                Option[(TomlPath, ParsedToml)] =
-                    ((t: Option[(TomlPath, ParsedToml)]) ->
-                    (f: (((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)])) ->
-                    (Option.flatMap(f, t): Option[(TomlPath, ParsedToml)]));
-            fold(
-                func,
-                initial,
-                apply
-            )
-        };
-
-        Option.flatMap(t -> {
-            let (_, parsedToml) = t;
-            parsedToml
-        }, input.parser())
-    }
-
     /**
-     * This is a hack to be able to parse dictionaries (`[*key*]`) and array of
-     * of tables (`[[*key*]]`). It might be better to start by parsing
-     * to a format where that kind of path changes was part of the format,
-     * rather than directly parsing it to the final map.
+     * input: A list of characters expected to be a toml format
+     * acc: A empty map to be populate with a toml structure
+     * returns:
+     *     Ok: A Map from strings to InnerToml representing the input string
+     *     Err: A String descriping what went wrong
      */
-    def parseTomlLine(): Parser[((TomlPath, ParsedToml)) -> Option[(TomlPath, ParsedToml)]] = ???/*{
-        use Parser2.{map, or};
-        parseKeyValue().map(input -> {
-            let (k, v) = input;
-            let f = tuple -> {
-                let (path, oldParsedToml) = tuple;
-                Option.map(
-                    u -> (path, u),
-                    updateParsedToml(
-                        oldParsedToml,
-                        path,
-                        internalMap -> Some(Map.insert(k, v, internalMap))
-                    )
-                )
-            };
-            f
-        }) `or` parseDictionaryContext().map(t -> {
-            t2 -> {
-                ???
+    pub def parse(
+        input: List[Char],
+        // This may have to be a TomlPath, for ArrayTables to work properly
+        acc: ParsedToml
+    ): Result[ParsedToml, ParseError] = {
+        match parseInternal(input, acc) {
+            case (input1, Ok(parsed)) => {
+                match input1 {
+                    case '[' :: xs => {
+                        let trimmed = xs.trimSpace();
+                        match trimmed {
+                            case '[' :: xss => match parseKey(xsss) {
+                                case (xsss, Ok(keys)) => 
+                                case (_, Err(s)) => s
+                            }
+                            case _ => match parseKey(trimmed) {
+                                case (xss, Ok(keys)) => ???
+                                case (_, Err(s)) => ???
+                            }
+                        } 
+                    }
+                    case _ :: xs => {
+                        // We are always called after parseInternal has run. That only returns if
+                        // it either saw a '[' or EOF. Because of this we shouldn't be able to
+                        // reach this point.
+                        Err("Unreachable!")
+                    }
+                    case Nil => Ok(parsed)
+                }
             }
-        }) `or` parseArrayContext().map(_ -> {
-            ???
-        }) `or` parseWhiteLine().map(_ -> {
-            t -> t
-        })
-    }*/
-
-    def updateParsedToml(
-        pt: ParsedToml,
-        tp: TomlPath,
-        f: ParsedToml -> Option[ParsedToml]
-    ): Option[ParsedToml] = match tp {
-        case Nil => pt.f()
-        case x :: xs => match Map.get(x, pt) {
-            case Some(v) => Option.map(
-                u -> Map.update(_ -> Some(u), x, pt),
-                updateInnerToml(v, xs, f)
-            )
-            case None => Option.map(
-                u -> Map.insert(x, MapVal(u), pt),
-                updateParsedToml(Map.empty(), xs, f)
-            )
+            case (_, Err(s)) => Err(s)
         }
     }
 
-    def updateInnerToml(
-        toml: InnerToml,
-        tp: TomlPath,
-        f: ParsedToml -> Option[ParsedToml]
-    ): Option[InnerToml] = match tp {
-        case Nil => match toml {
-            case MapVal(pt) => Option.map(x -> MapVal(x), pt.f())
-            case _ => None
-        } 
-        case xs => match toml {
-            case MapVal(pt) => Option.map(x -> MapVal(x), updateParsedToml(pt, xs, f))
-            case ArrayTableVal(l) => Option.map(x -> ArrayTableVal(x :: l), updateParsedToml(Map.empty(), xs, f))
-            case _ => None
-        }
-    }
+    def parseInternal(
+        input: List[List[Char]],
+        acc: ParsedToml
+    ): (input, Result[ParsedToml, ParseError]) = ???
 
-    def parseWhiteLine(): Parser[()] = {
-        use Parser2.{and, map};
-        (ws() `and` newLine())
-            .map(_ -> ())
-    }
 
-    def parseDictionaryContext(): Parser[List[List[Char]]] = {
-        use Parser2.{delimit, tag};
-        delimit(tag('['), parseKeys(), tag(']'))
-    }
+    def insertNested(
+        map: ParsedToml,
+        insert: InnerToml,
+        path: List[List[Char]]
+    ): Result[ParsedToml, ParseError] = ???
 
-    def parseArrayContext(): Parser[List[List[Char]]] = {
-        use Parser2.{delimit, tag, and};
-        delimit(tag('[') `and` tag('['), parseKeys(), tag(']') `and` tag(']'))
-    }
 
-    pub def parseKeyValue(): Parser[(List[Char], InnerToml)] = {
-        use Parser2.{and, tag, map, then};
-        //Console.printLine("parseKeyValue");
+        
 
-        parseKey() `and` (ws() `and` tag('=') `and` ws()).then(_ -> parseValue())
-    }
-
-    def parseKeys(): Parser[List[List[Char]]] =
-        use Parser2.{and, tag, takeWhile, map};
-    (parseKey() `and` takeWhile(
-        (ws() `and` tag('.') `and` ws() `and` parseKey())
-            .map(t -> {
-                let (_, k) = t;
-                k
-            })
-    )).map(t -> {
-        let (lhs, rhs) = t;
-        lhs :: rhs
-    })
-
-    pub def parseKey(): Parser[List[Char]] = {
-        use Parser2.or;
-
-        parseBareKey() `or` parseLiteralString() `or` parseBasicString()
-    }
-
-    pub def parseValue(): Parser[InnerToml] = {
-        use Parser2.map;
-
-        parseString().map(List.toString).map(StringVal)
-    }
-
-    def parseBareKey(): Parser[List[Char]] = {
-        use Parser2.{takeWhile, or, tag};
-        takeWhile(parseDigit() `or` parseLetter() `or` tag('-') `or` tag('_'))
-    }
-
-    def parseString(): Parser[List[Char]] = {
-        use Parser2.or;
-
-        parseMultiLineBasicString() `or`
-            parseMultiLineLiteralString() `or`
-            parseLiteralString() `or`
-            parseBasicString()
-    }
-
-    def parseLiteralString(): Parser[List[Char]] = {
-        use Parser2.{delimit, char, filter, takeWhile, tag};
-        let quote = tag('\'');
-        delimit(quote, takeWhile(char().filter(c -> c != '\'' && !c.isCR() && !c.isLF())), quote)
-    }
-
-    def parseMultiLineLiteralString(): Parser[List[Char]] = {
-        use Parser2.{then, not, delimit, and, char, takeWhile, tag};
-        let quote = tag('\'') `and` tag('\'') `and` tag('\'');
-        delimit(quote, takeWhile(not(quote).then(() -> char())), quote)
-    }
-
-    pub def parseBasicString(): Parser[List[Char]] = {
-        use Parser2.{tag, takeWhile, delimit};
-
-        delimit(tag('"'), takeWhile(parseEscapeChar()), tag('"'))
-    }
-
-    def parseMultiLineBasicString(): Parser[List[Char]] = {
-        use Parser2.{tag, takeWhile, delimit, and, or};
-        let quote = tag('"') `and` tag('"') `and` tag('"');
-
-        delimit(quote, takeWhile(parseEscapeChar() `or` tag('\n') `or` tag('\r')), quote)
-    }
-
-    def parseDigit(): Parser[Char] = {
-        use Parser2.{char, filter};
-
-        char().filter(Char.isDigit)
-    }
-
-    def parseLetter(): Parser[Char] = {
-        use Parser2.{char, filter};
-
-        char().filter(Char.isLetter)
-    }
-
-    def parseEscapeChar(): Parser[Char] = input -> match input {
-        case '\\' :: xs => match xs {
+    def parseEscapeChar(input: List[Char]): (List[Char], Option[Char]) = input -> match input {
+        match input {
             case 'u' :: u1 :: u2 :: u3 :: u4 :: ys => ???
             case 'U' :: u1 :: u2 :: u3 :: u4 :: u5 :: u6 :: u7 :: u8 :: ys => ???
-            case 'b' :: ys => Some((ys, ???))
-            case 't' :: ys => Some((ys, '\t'))
-            case 'n' :: ys => Some((ys, '\n'))
-            case 'f' :: ys => Some((ys, ???))
-            case 'r' :: ys => Some((ys, '\r'))
-            case '"' :: ys => Some((ys, '"'))
-            case '\\' :: ys => Some((ys, '\\'))
+            case 'b' :: ys => (Some(ys), ???)
+            case 't' :: ys => (Some(ys), '\t')
+            case 'n' :: ys => (Some(ys), '\n')
+            case 'f' :: ys => (Some(ys), ???)
+            case 'r' :: ys => (Some(ys), '\r')
+            case '"' :: ys => (Some(ys), '"')
+            case '\\' :: ys => (Some(ys), '\\')
             case _ => None
         }
-        case '"' :: xs => None
-        case x :: xs => Some((xs, x))
-        case Nil => None
     }
 
-    def newLine(): Parser[()] = {
-        use Parser2.{char, filter, or, and, map};
-        (char().filter(isCR) `and` char().filter(isLF))
-            .map(_ -> ())
-        `or` char().filter(isLF).map(_ -> ())
+    def trimNewLine(): (List[Char], Option[()]) = {
+        match input {
+            case x :: xs => if (isCR(x)) {
+                match input {
+                    case y :: ys => if (isLF(x)) {
+                        (Some(()), ys)
+                    } else {
+                        (None, input)
+                    }
+                    case Nil => (None, xs)
+                }
+            } else if (isLF(x)) {
+                (Some(()), xs)
+            } else {
+                (None, input)
+            }
+            case Nil => (None, input)
+        }
     }
 
-    def ws(): Parser[()] = {
-        use Parser2.{tag, takeWhile, or, map};
-        takeWhile(tag(' ') `or` tag('\t')).map( _ -> ())
+    def trimWhiteSpace(input: List[Char]): (List[Char], Option[()]) = {
+        match input {
+            case x :: xs => if (isWhiteSpace(x)) {
+                trimWhiteSpaceInternal(xs)
+            } else {
+                (xs, None)
+            }
+            case Nil => (input, None)
+        }
     }
+
+    def trimWhiteSpaceInternal(input: List[Char]): (List[Char], Option[()]) = {
+        match input {
+            case x :: xs => if (isWhiteSpace(x)) {
+                trimWhiteSpaceInternal(xs)
+            } else {
+                (xs, Some(()))
+            }
+            case Nil => (input, Some(()))
+        }
+    }
+
+    def isWhiteSpace(x: Char): Bool = {
+        x == ' ' || x == '\t'
+    }
+            
 
     def isCR(c: Char): Bool = c == Char.fromInt32(13)
 
