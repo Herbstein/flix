@@ -1,4 +1,6 @@
-namespace Manifest {
+use Result.flatMap;
+
+namespace Pkger/Manifest {
     pub type alias Author = { name: String
                             , email: String
                             }
