@@ -1,4 +1,3 @@
-
 enum TomlLine {
     case Table(List[String])
     case ArrayOfTable(List[String])
