@@ -1,5 +1,5 @@
-use SemVer.{isCompatible};
-use SemVer.SemVer;
+use Pkger/SemVer.isCompatible;
+use Pkger/SemVer.SemVer;
 
 @test
 def testHigherPatchInSpecificWhenZeroMajor01(): Bool = isCompatible(SemVer.SemVer(0, 1, 2), SemVer.SemVer(0, 1, 0))

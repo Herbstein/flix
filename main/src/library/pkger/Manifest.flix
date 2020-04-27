@@ -1,4 +1,5 @@
 use Result.flatMap;
+use Pkger/SemVer.SemVer;
 
 namespace Pkger/Manifest {
     pub type alias Author = { name: String
@@ -6,26 +7,26 @@ namespace Pkger/Manifest {
                             }
 
     pub type alias Package = { name: String
-                             , version: SemVer.SemVer
+                             , version: SemVer
                              , authors: List[Author]
                              , description: String
                              , license: String
-                             , depends: Map[String, SemVer.SemVer]
+                             , depends: Map[String, SemVer]
                              , home: Option[String]
                              }
 
     pub type alias LockedPackage = { name: String
-                                   , version: SemVer.SemVer
+                                   , version: SemVer
                                    // All transitive dependencies, their specific version, and where they were retrieved from.
-                                   , transitive: Map[String, SemVer.SemVer]
+                                   , transitive: Map[String, SemVer]
                                    }
 
-    pub def newLockedPackage(name: String, version: SemVer.SemVer, transitive: Map[String, SemVer.SemVer]): LockedPackage = {
+    pub def newLockedPackage(name: String, version: SemVer, transitive: Map[String, SemVer]): LockedPackage = {
         {name = name, version = version, transitive = transitive}
     }
 
     // Add a new package to the package. Handle superseding old versions
-    pub def addDependency(self: Package, package: String, version: SemVer.SemVer): Package = {
+    pub def addDependency(self: Package, package: String, version: SemVer): Package = {
         use Map.insert;
         let selfx = self.removeDependency(package);
         let addedPackage = insert(package, version, selfx.depends);
@@ -39,9 +40,9 @@ namespace Pkger/Manifest {
     }
 
     // Duplicated temporarily from TestManifest.flix
-    def packageRepository(package: String, version: SemVer.SemVer): Map[SemVer.SemVer, Map[String, SemVer.SemVer]] = {
+    def packageRepository(package: String, version: SemVer): Map[SemVer, Map[String, SemVer]] = {
         use Map.{empty, filterWithKey, getWithDefault, insert};
-        use SemVer.{isCompatible, SemVer};
+        use Pkger/SemVer.isCompatible;
 
         let package_one_versions = empty()
             |> insert(SemVer.SemVer(0, 1, 0), empty())
@@ -67,15 +68,15 @@ namespace Pkger/Manifest {
 
     // TODO: Add error node here or return Result from `lockPackageHelper`?
     enum DependencyTree {
-        case DepNode(String, SemVer.SemVer, List[DependencyTree])
+        case DepNode(String, SemVer, List[DependencyTree])
     }
 
-    def newer(k: SemVer.SemVer, v: a, kx: SemVer.SemVer, vx: a): (SemVer.SemVer,  a) = {
+    def newer(k: SemVer, v: a, kx: SemVer, vx: a): (SemVer,  a) = {
         let cmp = k <=> kx;
         if (cmp < 0) (kx, vx) else (k, v)
     }
 
-    def lockPackageHelper(package: String, bound: SemVer.SemVer): DependencyTree = {
+    def lockPackageHelper(package: String, bound: SemVer): DependencyTree = {
         use Map.{toList, mapWithKey, valuesOf};
         use List.{map, find, filterMap};
 
@@ -93,7 +94,7 @@ namespace Pkger/Manifest {
         }
     }
 
-    def flattenDependencyTree(tree: DependencyTree): List[(String, SemVer.SemVer, List[(String, SemVer.SemVer)])] = {
+    def flattenDependencyTree(tree: DependencyTree): List[(String, SemVer, List[(String, SemVer)])] = {
         match tree {
             case DepNode(package, version, dependencies) => {
                 let x = List.flatMap(flattenDependencyTree, dependencies);
@@ -114,13 +115,13 @@ namespace Pkger/Manifest {
     }
 
     pub enum InitError {
-        case PathAlreadyExists(Path)
+        case PathAlreadyExists(Core/Io/File.File)
         case GenericIoError
     }
 
     // Create a new package. Everything but the name of the package can be populated with sensible defaults from the environment
-    pub def initPackage(name: String): /* Package */ Result[Path, InitError] & Impure = {
-        use Path.add;
+    pub def initPackage(name: String): /* Package */ Result[Core/Io/File.File, InitError] & Impure = {
+        use Core/Io/File.add;
 
         let getProjectDir = (base) -> base.add(name);
 
@@ -140,10 +141,10 @@ namespace Pkger/Manifest {
         let getMainTestFile = (base) -> getTestDir(base).add("TestMain.flix");
 
         let newFile = (content) -> (path) -> {
-            Path.writeLines(path, Array.toList(content))
+            Core/Io/File.writeLines(path, Array.toList(content))
         };
 
-        let workingDir = Path.workingDirectory();
+        let workingDir = Core/Io/File.workingDirectory();
 
         let files = Array.toList([getPackageFile, getHistoryFile, getLicenseFile, getReadmeFile, getMainSourceFile, getMainTestFile]);
         let dirs = Array.toList([getBuildDir, getSourceDir, getTestDir]);
@@ -153,9 +154,8 @@ namespace Pkger/Manifest {
             |> Array.toList
             |> List.flatten
             |> List.map(f -> {
-                    use Result.flatMap;
-                    let* path: Path = Result.map(f, workingDir);
-                    let* exists: Bool = Path.exists(path);
+                    let* path = Result.map(f, workingDir);
+                    let* exists = Core/Io/File.exists(path);
                     Ok((path, exists))
                 })
             |> List.filterMap(Result.toOption)
@@ -166,7 +166,7 @@ namespace Pkger/Manifest {
                 // Create all directories required for the package
                 List.map(f -> {
                     let dir = Result.map(f, workingDir);
-                    Result.flatMap(Path.mkdirs, dir)
+                    Result.flatMap(Core/Io/File.mkdirs, dir)
                 }, dirs);
 
                 let quote = (s) -> Char.toString('"') + s + Char.toString('"');

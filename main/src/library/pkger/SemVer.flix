@@ -1,4 +1,4 @@
-namespace SemVer {
+namespace Pkger/SemVer {
     ///
     /// Represents an instance of a Semantic Versioning (SemVer) version.
     /// It is currently missing pre-release identifiers and build metadata
@@ -53,10 +53,10 @@ namespace SemVer {
         ///
         /// A parser reading a string into the SemVer enum
         ///
-        pub def parseSemVer(): Parser[SemVer.SemVer] = Parser.bind(parseNumber(), major -> {
+        pub def parseSemVer(): Parser[Pkger/SemVer.SemVer] = Parser.bind(parseNumber(), major -> {
             Parser.bind(Parser.char('.') *> parseNumber(), minor -> {
                 Parser.bind(Parser.char('.') *> parseNumber(), patch -> {
-                    use SemVer.SemVer;
+                    use Pkger/SemVer.SemVer;
                     Parser.return(SemVer.SemVer(major, minor, patch))
                 })
             })

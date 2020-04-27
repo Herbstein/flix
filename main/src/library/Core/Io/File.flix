@@ -35,11 +35,9 @@ namespace Core/Io/File {
     ///
     /// Combines every string in `xs` into a single path
     ///
-    pub def combine(xs: List[String]): Option[Path] & Impure = {
-        use List.fold;
-
+    pub def combine(xs: List[String]): Option[File] & Impure = {
         match xs {
-            case base :: xss => Some(fold((p, s) -> p.add(s), new(base), xss)),
+            case base :: xss => Some(List.fold((p, s) -> p.add(s), new(base), xss)),
             case _ => None
         }
     }
@@ -48,28 +46,28 @@ namespace Core/Io/File {
     ///
     /// Appends the string `s` to the end of the path `p`
     ///
-    pub def add(p: Path, s: String): Path & Impure = {
+    pub def add(f: File, s: String): File & Impure = {
         import new java.io.File(##java.io.File, String) as newFile;
 
-        let Path(baseFile) = p;
-        Path(newFile(baseFile, s))
+        let File(baseFile) = f;
+        File(newFile(baseFile, s))
     }
 
     ///
     /// Gets the current working directory of the process
     ///
-    pub def workingDirectory(): Result[Path, IOError] & Impure = tryWithCatch(_ -> {
+    pub def workingDirectory(): Result[File, IOError] & Impure = tryWithCatch(_ -> {
         import java.io.File.getAbsoluteFile();
-        let Path(javaFile) = new("");
-        Path(javaFile.getAbsoluteFile())
+        let File(javaFile) = new("");
+        File(javaFile.getAbsoluteFile())
     })
 
     ///
-    /// Creates all directories in the path `p` if they don't already exist
+    /// Creates all directories in the path `f` if they don't already exist
     ///
-    pub def mkdirs(p: Path): Result[Bool, IOError] & Impure = tryWithCatch(_ -> {
+    pub def mkdirs(f: File): Result[Bool, IOError] & Impure = tryWithCatch(_ -> {
         import java.io.File.mkdirs();
-        let Path(javaFile) = p;
+        let File(javaFile) = f;
         javaFile.mkdirs()
     })
 

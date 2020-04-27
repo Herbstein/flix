@@ -1,10 +1,10 @@
-use SemVer.SemVer;
-use Manifest.{LockedPackage, lockPackage, newLockedPackage};
+use Pkger/SemVer.SemVer;
+use Pkger/Manifest.{LockedPackage, lockPackage, newLockedPackage};
 use Map.{empty, insert};
 
 def _packageRepository(package: String, version: SemVer): Map[SemVer, Map[String, SemVer]] = {
     use Map.{filterWithKey, getWithDefault};
-    use SemVer.isCompatible;
+    use Pkger/SemVer.isCompatible;
 
     let package_one_versions = empty()
         |> insert(SemVer.SemVer(0, 1, 0), empty())
@@ -27,7 +27,7 @@ def _packageRepository(package: String, version: SemVer): Map[SemVer, Map[String
     compat_versions
 }
 
-def transitiveContains(mx: Map[String, SemVer.SemVer], m: (String, SemVer.SemVer)): Bool = {
+def transitiveContains(mx: Map[String, SemVer], m: (String, SemVer)): Bool = {
     Map.exists((k, v) -> match m { case (p, s) => p == k && s == v }, mx)
 }
 
