@@ -80,5 +80,3 @@ pub enum Error {
     case ProjectDirExists
     case GenericIoError
 }
-
-pub def main(): Result[Path, ErrorFull] & Impure = initPackage("package_test")
