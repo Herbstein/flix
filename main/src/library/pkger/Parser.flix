@@ -1,4 +1,4 @@
-namespace Parser2 {
+namespace Parser {
     type alias Parser[a] = List[Char] -> Option[(List[Char], a)]
     
     pub def char(): Parser[Char] = input -> match input {
