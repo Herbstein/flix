@@ -69,7 +69,7 @@ namespace ParseToml {
 
     pub def parse(input: List[Char]): Option[ParsedToml] = input |> parseTomlLines() |>
         Option.flatMap(match (_, tomlLines) -> parseHelper(tomlLines, Nil, Map.empty())) |>
-        Option.map(semToml -> ???)
+        Option.map(mapSem)
 
     /*pub enum InnerToml {
         case MapVal(ParsedToml),
@@ -275,8 +275,9 @@ namespace ParseToml {
     }
     
     def parseTomlLines(): Parser[List[TomlLine]] =
-        use Parser.{takeWhile, and, map};
-        takeWhile((parseTomlLine() `and` parseNewLine()).map(match (l, _) -> l))
+        use Parser.{takeWhile, and, map, then};
+        (parseTomlLine() `and` takeWhile(takeWhile(parseNewLine()).then(_ -> parseTomlLine())))
+            .map(match (first, rest) -> first :: rest)
 
     def parseTomlLine(): Parser[TomlLine] =
         use Parser.{or, map, then};
@@ -415,28 +416,19 @@ namespace ParseToml {
 
     namespace Test {
         @test
-        def simpleTest(): Bool & Impure = {
+        pub def simpleTest(): Bool =
             use ParseToml.{parse, InnerToml, serialize};
 
             let parsed = parse('a' :: ' ' :: '=' :: ' ' :: '"' :: 'b' :: '"' :: Nil);
             match parsed {
-                case None => {
-                    false
-                }
-                case Some(outerToml) => {
-                    Console.printLine(outerToml.serialize());
-                    match Map.get("a", outerToml) {
-                        case None => {false}
-                        case Some(innerToml) => match innerToml {
-                            case InnerToml.StringVal(s) => s == "b"
-                            case _ => {
-                                Console.printLine(outerToml.serialize());
-                                false
-                            }
-                        }
+                case None => false
+                case Some(outerToml) => match Map.get("a", outerToml) {
+                    case None => false
+                    case Some(innerToml) => match innerToml {
+                        case InnerToml.StringVal(s) => s == "b"
+                        case _ => false
                     }
                 }
             }
-        }
     }
 }

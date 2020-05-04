@@ -3,7 +3,7 @@ namespace Parser {
     
     pub def char(): Parser[Char] = input -> match input {
         case Nil => None
-        case x :: xs => Some((xs, x))
+        case x :: xs => Some((xs, x: Char))
     }
 
     pub def filter[a](
