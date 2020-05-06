@@ -61,7 +61,7 @@ namespace ParseToml {
         case Table(map) => ???
         case ArrayOfTables(list) => ???
         case InlineTable(map) => ???
-        case ArrayV(list) => "[" + (list |> List.map(e -> serializeSem(e)) |> String.intercalate(", ")) + "]"
+        case ArrayV(list) => "[" + (list |> List.map(e -> serializeSem(e) + ",") |> String.flatten) + "]"
         case StringV(str) => Char.toString('"') + str + Char.toString('"')
         case IntV(int) => ???
         case FloatV(str) => ???
@@ -132,11 +132,11 @@ namespace ParseToml {
 
     def mapSemInner(input: SemanticToml): InnerToml = match input {
             case Table(map) => MapVal(mapSem(map))
-            case ArrayOfTables(array) => ArrayVal(
-                List.reverse(List.map(i -> MapVal(mapSem(i)), array))
+            case ArrayOfTables(list) => ArrayVal(
+                List.reverse(List.map(i -> MapVal(mapSem(i)), list))
             )
             case InlineTable(map) => MapVal(mapSem(map))
-            case ArrayV(array) => ArrayVal(List.map(i -> mapSemInner(i), array))
+            case ArrayV(list) => ArrayVal(List.map(i -> mapSemInner(i), list))
             case StringV(str) => StringVal(str)
             case IntV(int) => IntVal(int)
             case FloatV(str) => FloatVal(str)
@@ -146,10 +146,6 @@ namespace ParseToml {
             case LocalDate(str) => DateVal(str)
             case LocalTime(str) => DateVal(str)
     }
-
-    //def convertInt(int: String): Int = ???
-
-    //def convertBool(bool: String): Bool = ???
 
     def parseHelper(
         input: List[TomlLine],
@@ -180,11 +176,11 @@ namespace ParseToml {
             case last :: init =>
                 indexTable(List.reverse(init), outer) |>
                 Option.flatMap(t -> match Map.get(last, t) {
-                    case Some(ArrayOfTables(array)) =>
+                    case Some(ArrayOfTables(list)) =>
                         insertTable(
                             List.reverse(init),
                             outer,
-                            Map.update(_ -> Some(ArrayOfTables(Map.empty() :: array)), last, t)
+                            Map.update(_ -> Some(ArrayOfTables(Map.empty() :: list)), last, t)
                         ) |> parseHelper(xs, key)
                     case Some(_) =>
                         // Incompatible type
@@ -302,21 +298,18 @@ namespace ParseToml {
     }
     
     def parseTomlLines(): Parser[List[TomlLine]] =
-        use Parser.{takeWhile, and, map, then};
-        (parseTomlLine() `and` takeWhile(parseNewLine().then(_ -> parseTomlLine())))
-            .map(match (first, rest) -> first :: rest)
+        use Parser.{tailSeperatedAny, takeMany};
+        tailSeperatedAny(parseTomlLine(), takeMany(parseNewLine()))
 
     def parseTomlLine(): Parser[TomlLine] =
         use Parser.{or, map, then};
-        parseNewLine().then(_ -> parseTomlLine()) `or`
         parseTable() `or`
         parseArrayOfTables() `or`
         parseKeyValue()
 
     def parseNewLine(): Parser[()] = {
-        use Parser.{and, map};
-        (ws() `and` newLine())
-            .map(_ -> ())
+        use Parser.{skip, skipRight, takeAny};
+        takeAny(ws()).skip() `skipRight` newLine()
     }
 
     def parseTable(): Parser[TomlLine] = {
@@ -330,18 +323,14 @@ namespace ParseToml {
     }
 
     def parseKeyValue(): Parser[TomlLine] =
-        use Parser.{and, tag, map, then};
+        use Parser.{and, tag, map, skipRight, takeAny};
 
-        ((parseKeys() `and` (ws() `and` tag('=') `and` ws())).map(match (k, _) -> k)
+        (parseKeys().skipRight(takeAny(ws()) `and` tag('=') `and` takeAny(ws()))
             `and` parseValue()).map(match (k, v) -> KeyValuePair(k, v))
 
     def parseKeys(): Parser[List[String]] =
-        use Parser.{and, tag, takeWhile, map};
-        (parseKey() `and`
-            takeWhile(
-                (ws() `and` (tag('.')) `and` (ws()) `and` parseKey())
-                    .map(match (_, k) -> k))
-        ).map(match (lhs, rhs) -> lhs :: rhs)
+        use Parser.{and, tag, seperatedMany, takeAny};
+        seperatedMany(parseKey(), takeAny(ws()) `and` tag('.') `and` takeAny(ws()))
 
     pub def parseKey(): Parser[String] = {
         use Parser.or;
@@ -350,53 +339,79 @@ namespace ParseToml {
     }
 
     pub def parseValue(): Parser[SemanticToml] = {
-        use Parser.map;
+        use Parser.{map, or};
 
-        parseString().map(StringV) /*`or`
-        parseInt().map(v -> IntV(convertInt(v))) `or`
-        parseBool().map(v -> BoolV(convertBool(v)))*/
+        parseString() `or`
+        // This line has to be before the next, since float is a superset of Int
+        parseFloat() `or`
+        parseInt() `or`
+        parseBool() `or`
+        parseArray()
     }
 
+    def parseInt(): Parser[SemanticToml] = 
+        use Parser.{seperatedMany, char, filter, map, optional, tag};
+        seperatedMany(char().filter(Char.isDigit), optional(tag('_'))).map(List.toString).map(convertInt).map(IntV)
+
+    def convertInt(int: String): Int = ???
+
+    def parseFloat(): Parser[SemanticToml] = _ -> None
+        //TODO:
+        //_ -> None
+
+    def parseBool(): Parser[SemanticToml] =
+        use Parser.{tag, and, or, map};
+        (tag('t') `and` tag('r') `and` tag('u') `and` tag('e')).map(_ -> BoolV(true)) `or`
+        (tag('f') `and` tag('a') `and` tag('l') `and` tag('s') `and` tag('e')).map(_ -> BoolV(false))
+
+    
+    def parseArray(): Parser[SemanticToml] =
+        use Parser.{delimit, tag, and, map, tailSeperatedAny, or, takeAny};
+
+        delimit(
+            tag('[') `and` takeAny(ws() `or` newLine()),
+            tailSeperatedAny((input -> input |> parseValue()), takeAny(ws() `or` newLine()) `and` tag(',')),
+            takeAny(ws() `or` newLine()) `and` tag(']')
+        ).map(ArrayV)
 
     def parseBareKey(): Parser[String] = {
-        use Parser.{takeWhile, or, tag, map};
-        takeWhile(parseDigit() `or` parseLetter() `or` tag('-') `or` tag('_'))
-            .notNil()
+        use Parser.{takeMany, or, tag, map};
+        takeMany(parseDigit() `or` parseLetter() `or` tag('-') `or` tag('_'))
             .map(List.toString)
     }
 
-    def parseString(): Parser[String] = {
-        use Parser.or;
+    def parseString(): Parser[SemanticToml] = {
+        use Parser.{or, map};
 
-        parseMultiLineBasicString() `or`
+        (parseMultiLineBasicString() `or`
             parseMultiLineLiteralString() `or`
             parseLiteralString() `or`
-            parseBasicString()
+            parseBasicString()).map(StringV)
     }
 
     def parseLiteralString(): Parser[String] = {
-        use Parser.{delimit, char, filter, takeWhile, tag, map};
-        let quote = tag(Char.fromInt32(39));
-        delimit(quote, takeWhile(char().filter(c -> c != '\'' && !c.isCR() && !c.isLF())), quote).map(List.toString)
+        use Parser.{delimit, char, filter, takeAny, tag, map};
+        let quote = tag('\'');
+        delimit(quote, takeAny(char().filter(c -> c != '\'' && !c.isCR() && !c.isLF())), quote).map(List.toString)
     }
 
     def parseMultiLineLiteralString(): Parser[String] = {
-        use Parser.{then, not, delimit, and, char, takeWhile, tag, map};
+        use Parser.{not, delimit, and, char, takeAny, tag, map, skipLeft};
         let quote = tag('\'') `and` tag('\'') `and` tag('\'');
-        delimit(quote, takeWhile(not(quote).then(() -> char())), quote).map(List.toString)
+        delimit(quote, takeAny(not(quote) `skipLeft` char()), quote).map(List.toString)
     }
 
     pub def parseBasicString(): Parser[String] = {
-        use Parser.{tag, takeWhile, delimit, map};
+        use Parser.{tag, takeAny, delimit, map};
 
-        delimit(tag('"'), takeWhile(parseEscapeChar()), tag('"')).map(List.toString)
+        delimit(tag('"'), takeAny(parseEscapeChar()), tag('"')).map(List.toString)
     }
 
     def parseMultiLineBasicString(): Parser[String] = {
-        use Parser.{tag, takeWhile, delimit, and, or, map};
+        use Parser.{tag, takeAny, delimit, and, or, map};
         let quote = tag('"') `and` tag('"') `and` tag('"');
 
-        delimit(quote, takeWhile(parseEscapeChar() `or` tag('\n') `or` tag('\r')), quote).map(List.toString)
+        delimit(quote, takeAny(parseEscapeChar() `or` tag('\n') `or` tag('\r')), quote).map(List.toString)
     }
 
     def parseDigit(): Parser[Char] = {
@@ -429,12 +444,6 @@ namespace ParseToml {
         case Nil => None
     }
 
-    def notNil(
-        p: Parser[List[a]]
-    ): Parser[List[a]] =
-        use Parser.filter;
-        p.filter(l -> !List.isEmpty(l))
-
     def newLine(): Parser[()] = {
         use Parser.{char, filter, or, and, map};
         (char().filter(isCR) `and` char().filter(isLF))
@@ -443,8 +452,8 @@ namespace ParseToml {
     }
 
     def ws(): Parser[()] = {
-        use Parser.{tag, takeWhile, or, map, not, filter, char};
-        takeWhile(tag(' ') `or` char().filter(c -> c == Char.fromInt32(9))).map( _ -> ())
+        use Parser.{tag, or, skip};
+        skip(tag(' ') `or` tag(Char.fromInt32(9)))
     }
 
     def isCR(c: Char): Bool = c == Char.fromInt32(13)
@@ -519,11 +528,13 @@ namespace ParseToml {
         @test
         pub def arrayTest(): Bool & Impure = {
             use ParseToml.{parse, InnerToml, serialize};
+            Console.printLine("");
+            Console.printLine("arrayTest");
             let str = String.intercalateChar(Char.fromInt32(10),
                 "[a]" ::
                 "a = ['a', 'a']" :: Nil
             );
-            //Console.printLine(str);
+            Console.printLine(str);
             let parsed = ParseToml.parse(String.toList(str));
             match parsed {
                 case Some(outer) => {
