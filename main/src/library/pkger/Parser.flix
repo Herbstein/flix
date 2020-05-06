@@ -1,17 +1,51 @@
 namespace Parser {
     type alias Parser[a] = List[Char] -> Option[(List[Char], a)]
     
+    /// Creates a parser which uses none of it's input, and have parsed `ret`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("a") |> pure(0) `assertEq!` Some(('a' :: Nil, 0))
+    /// ```
     pub def pure[a](
         ret: a
     ): Parser[a] = input -> Some((input, ret))
 
+    /// Creates a parser which takes the first character from it's input, and outputs it
+    ///
+    /// Fails if the input was empty
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Nil |> char() `assertEq!` None
+    /// ```
+    ///
+    /// ```
+    /// String.toList("a") |> char() `assertEq!` Some((Nil, 'a'))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("ab") |> char() `assertEq!` Some(('b' :: Nil, 'a'))
+    /// ```
     pub def char(): Parser[Char] = input -> match input {
         case Nil => None
         case x :: xs => Some((xs, x: Char))
     }
 
-    pub def tag(c: Char): Parser[Char] = char().filter(d -> d == c)
-
+    /// Given a parser `p`, creates a parser like `p`, except it fails if the predicate `f` is not
+    /// true for a parsed value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("0") |> char().filter(Char.isDigit) `assertEq!` Some((Nil, '0'))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("a") |> char().filter(Char.isDigit) `assertEq!` None
+    /// ```
     pub def filter[a](
         p: Parser[a],
         f: a -> Bool
@@ -24,6 +58,48 @@ namespace Parser {
         case None => None
     }
 
+    /// Creates a parser which takes the first character from it's input if that character is equal
+    /// to `c`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("a") |> tag('a') `assertEq!` Some((Nil, 'a'))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> tag('a') `assertEq!` None
+    /// ```
+    ///
+    /// ```
+    /// String.toList("ab") |> tag('a') `assertEq!` Some((b :: Nil, 'a'))
+    /// ```
+    pub def tag(c: Char): Parser[Char] = char().filter(d -> d == c)
+
+    /// Given a parser `p`, returns a parser like `p`, except any value prased is mapped with the
+    /// function `f`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("a") |> char().map(c -> c == 'a') `assertEq!` Some((Nil, true))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("a") |> char().map(c -> if (c == 'a') {
+    ///     'b'
+    /// } else {
+    ///     'y'
+    /// })
+    /// `assertEq!`
+    /// Some((Nil, 'b'))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("abc") |> seperatedAny(char(), tag('b')).map(List.toString)
+    /// `assertEq!`
+    /// Some((Nil, "ac"))
+    /// ```
     pub def map[a, b](
         p: Parser[a],
         f: a -> b
@@ -32,6 +108,109 @@ namespace Parser {
         case None => None
     }
 
+    /// Given parsers `lhs` and `rhs`, returns a parser which first tries to run `lhs` on the input,
+    /// and if successfull tries to run `rhs` on the rest of the input. The new parser returns a
+    /// tuple of the result from each parser if both parsers succeed. The new parser fails if
+    /// either `lhs` or `rhs` fail.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("ab") |> (tag('a') `and` tag('b')) `assertEq!` Some((Nil, ('a', 'b')))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("aa") |> (tag('a') `and` tag('b')) `assertEq!` None
+    /// ```
+    pub def and[a, b](
+        lhs: Parser[a],
+        rhs: Parser[b]
+    ): Parser[(a, b)] = input -> match input.lhs() {
+        case Some((xs, v)) => match xs.rhs() {
+            case Some((ys, u)) => Some((ys, (v, u)))
+            case None => None
+        }
+        case None => None
+    }
+
+    /// Given parsers `lhs` and `rhs`, returns a parser which first tries to run `lsh` on the input,
+    /// and if it fails tries to run `rhs` on the input. The new parser returns the output of the
+    /// first parser if it is successfull, else returns the output of the second parser.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("ab") |> (tag('a') `or` tag('b')) `assertEq!` Some(('b' :: Nil, 'a'))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("ba") |> (tag('a') `or` tag('b')) `assertEq!` Some(('a' :: Nil, 'b'))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("zz") |> (tag('a') `or` tog('b')) `assertEq!` None
+    /// ```
+    pub def or[a](
+        lhs: Parser[a],
+        rhs: Parser[a]
+    ): Parser[a] = input -> match input.lhs() {
+        case None => input.rhs()
+        case ret => ret
+    }
+
+    /// Given a parser `p`, and a function `f` from it's output to a new parser, creates a new
+    /// parser which runs `p`, and if successful uses `f` to create a new parser `g`. `g` is then
+    /// run on tht rest of the input.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let parser = (char() `and` char())
+    ///     .then(match (lhs, rhs) -> tag('+')
+    ///     .map(v -> lhs :: v :: rhs);
+    /// String.toList("12+") |> parser `assertEq!` Some((Nil, '1' :: '+' :: '2' :: Nil))
+    /// ```
+    pub def then[a, b](
+        p: Parser[a],
+        f: a -> Parser[b]
+    ): Parser[b] = input -> match input.p() {
+        case Some((xs, v)) => {
+            let res = f(v);
+            res(xs)
+        }
+        case None => None
+    }
+
+    /// Given a parser `p`, creates a parser which fails whenever `p` would have succeded, and
+    /// succeds whenever `p` would have failed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("a") |> not(tag('a')) `assertEq!` None
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> not(tag('a')) `assertEq!` Some(('b' :: Nil, ()))
+    /// ```
+    ///
+    pub def not[a](p: Parser[a]): Parser[Unit] = input -> match input.p() {
+        case Some(_) => None
+        case None => Some((input, ()))
+    }
+
+    /// Given a parser `p`, returns a parser like `p`, except it never fails. If `p` would have
+    /// failed, the new parser takes no characters from the input, and returns None.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("a") |> optional(tag('a')) `assertEq!` Some((Nil, Some('a')))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> optional(tag('a')) `assertEq!` Some(('b' :: Nil, None))
+    /// ```
     pub def optional[a](
         p: Parser[a]
     ): Parser[Option[a]] = input -> match input.p() {
@@ -39,6 +218,13 @@ namespace Parser {
         case Some((xs, parsed)) => Some((xs, Some(parsed)))
     }
 
+    /// Given a parser `p`, removes the characters `p` would have used from input and returns Unit
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("a") |> skip(char()) `assertEq` Some((Nil, ()))
+    /// ```
     pub def skip[a](
         p: Parser[a]
     ): Parser[Unit] = input -> match input.p() {
@@ -46,6 +232,20 @@ namespace Parser {
         case Some((xs, _)) => Some((xs, ()))
     }
 
+    /// Given parsers `lhs` and `rhs`, creates a parse which runs both parsers on the input, but
+    /// throws away the output of `lhs`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("abc") |> (char() `skipLeft` char())
+    /// `assertEq!`
+    /// Some(('c' :: Nil, 'b' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("abc") |> (tag('b') `skipLeft` char()) `assertEq!` None
+    /// ```
     pub def skipLeft[a, b](
         lhs: Parser[a],
         rhs: Parser[b]
@@ -54,6 +254,20 @@ namespace Parser {
         case Some((xs, _)) => xs |> rhs
     }
 
+    /// Given parsers `lhs` and `rhs`, creates a parse which runs both parsers on the input, but
+    /// throws away the output of `rhs`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("abc") |> (char() `skipRight` char())
+    /// `assertEq!`
+    /// Some(('c' :: Nil, 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("abc") |> (char() `skipRight` tag('a')) `assertEq!` None
+    /// ```
     pub def skipRight[a, b](
         lhs: Parser[a],
         rhs: Parser[b]
@@ -62,6 +276,18 @@ namespace Parser {
         case Some((xs, parsed)) => xs |> rhs.map(_ -> parsed)
     }
 
+    /// Given a parser `p`, returns a parser which runs `p` on the input until it returns None.
+    /// The new parser returns a list of the values `p` parsed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("aab") |> takeAny(tag('a')) `assertEq!` Some(('b' :: Nil, 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> takeAny(tag('a')) `assertEq!` Some(('b' :: Nil, Nil))
+    /// ```
     pub def takeAny[a](
         p: Parser[a]
     ): Parser[List[a]] = input -> Some(input.takeAnyInternal(p))
@@ -77,6 +303,19 @@ namespace Parser {
         case None => (input, Nil)
     }
 
+    /// Given a parser `p`, returns a parser which runs `p` on the input until it returns None.
+    /// The new parser returns a list of the values `p` parsed. The new parser fails if `p` didn't
+    /// accept the input any times.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("aab") |> takeMany(tag('a')) `assertEq!` Some(('b' :: Nil, 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> takeMany(tag('a')) `assertEq!` None
+    /// ```
     pub def takeMany[a](
         p: Parser[a]
     ): Parser[List[a]] = input -> match takeAnyInternal(input, p) {
@@ -84,27 +323,177 @@ namespace Parser {
         case ret => Some(ret)
     }
 
-    pub def seperatedMany[a, b](
-        p: Parser[a],
-        sep: Parser[b]
-    ): Parser[List[a]] = (p `and` takeAny(sep `skipLeft` p)).map(match (lhs, rhs) -> lhs :: rhs)
-
+    /// Given parsers `p` and `sep`, returns a parser which uses `p` zero or more times, with `sep`
+    /// interlaced. Returns a list of values parsed by `p`. Discards anything parsed by `sep`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("ababa") |> seperatedAny(tag('a'), tag('b'))
+    /// `assertEq`
+    /// Some((Nil, 'a' :: 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("abab") |> seperatedAny(tag('a'), tag('b'))
+    /// `assertEq`
+    /// Some(('b' :: Nil, 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("a") |> seperatedAny(tag('a'), tag('b')) `assertEq` Some((Nil, 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> seperatedAny(tag('a'), tag('b')) `assertEq` Some(('b' :: Nil, Nil))
+    /// ```
     pub def seperatedAny[a, b](
         p: Parser[a],
         sep: Parser[b]
     ): Parser[List[a]] = seperatedMany(p, sep) `or` pure(Nil)
 
-    pub def tailSeperatedMany[a, b](
+    /// Given parsers `p` and `sep`, returns a parser which uses `p` one or more times with `sep`
+    /// interlaced. Returns a list of values parsed by `p`. Discards anything parsed by `sep`.
+    /// Fails if the `p` couldn`t be run any times.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("ababa") |> seperatedMany(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// Some((Nil, 'a' :: 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("abab") |> seperatedMany(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// Some(('b' :: Nil, 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("a") |> seperatedMany(tag('a'), tag('b')) `assertEq!` Some((Nil, 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> seperatedMany(tag('a'), tag('b')) `assertEq!` None
+    /// ```
+    pub def seperatedMany[a, b](
         p: Parser[a],
         sep: Parser[b]
-    ): Parser[List[a]] = seperatedMany(p, sep) `skipRight` optional(sep)
+    ): Parser[List[a]] = (p `and` takeAny(sep `skipLeft` p)).map(match (lhs, rhs) -> lhs :: rhs)
 
+    /// Given parsers `p` and `sep`, returns a parser which uses `p` zero or more times with `sep`
+    /// interlaced. If `sep` can be run after the last run of `p`, the new parser does so. Returns a
+    /// list of values parsed by `p`. Discards anything parsed by `sep`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("ababa") |> tailSeperatedAny(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// Some((Nil, 'a' :: 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("abab") |> tailSeperatedAny(tag('a'), tag('b'))
+    /// `assertEq!'
+    /// Some((Nil, 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("a") |> tailSeperatedAny(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// Some((Nil, 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> tailSeperatedAny(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// Some(('b' :: Nil, Nil))
+    /// ```
     pub def tailSeperatedAny[a, b](
         p: Parser[a],
         sep: Parser[b]
     ): Parser[List[a]] = tailSeperatedMany(p, sep) `or` pure(Nil)
 
+    /// Given parsers `p` and `sep`, returns a parser which uses `p` one or more times with `sep`
+    /// interlaced. If `sep` can be run after the last run of `p`, the new parser does so. Returns a
+    /// list of values parsed by `p`. Discards anything parsed by `sep`. Fails if `p` couldn't be
+    /// run any times.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("ababa") |> tailSeperatedMany(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// Some((Nil, 'a' :: 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("abab") |> tailSeperatedMany(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// Some((Nil, 'a' :: 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("a") |> tailSeperatedMany(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// Some((Nil, 'a' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("b") |> tailSeperatedMany(tag('a'), tag('b'))
+    /// `assertEq!`
+    /// None
+    /// ```
+    pub def tailSeperatedMany[a, b](
+        p: Parser[a],
+        sep: Parser[b]
+    ): Parser[List[a]] = seperatedMany(p, sep) `skipRight` optional(sep)
 
+    /// Given three parsers `lhs`, `mid`, and `rhs`, returns new parser which starts by applying
+    /// `lhs`, throws away the output, applies `mid`, saves the output, and applies `rhs` and
+    /// returns the output from mid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("[abz]") |>
+    ///     delimit(tag('['), takeAny(char().filter(Char.isLetter)), tag(']'))
+    /// `assertEq!`
+    /// Some((Nil, 'a' :: 'b' :: 'z' :: Nil))
+    /// ```
+    ///
+    /// ```
+    /// String.toList("[a.bz]") |>
+    ///     delimit(tag('['), takeAny(char().filter(Char.isLetter)), tag(']'))
+    /// `assertEq!`
+    /// None
+    /// ```
+    ///
+    /// ```
+    /// String.toList("[]") |>
+    ///     delimit(tag('['), takeAny(char().filter(Char.isLetter)), tag(']'))
+    /// `assertEq!`
+    /// Some((Nil, Nil))
+    /// ```
+    pub def delimit[a, b, c](
+        lhs: Parser[a],
+        mid: Parser[b],
+        rhs: Parser[c]
+    ): Parser[b] = lhs `skipLeft` mid `skipRight` rhs
+
+    /// Given a Parser `p`, an initial value `initial`, and a function `f`, generates a parser,
+    /// which recursively applies `f` to initial, or the last output from `f`, and the next parsed
+    /// value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// String.toList("abc") |> fold(char(), Nil, l -> c -> c :: l)
+    /// `assertEq!`
+    /// Some((Nil, 'c' :: 'b' :: 'a' :: Nil))
+    /// ```
     pub def fold[a, b](
         p: Parser[a],
         initial: b,
@@ -120,47 +509,6 @@ namespace Parser {
     ): (List[Char], b) = match input.p() {
         case Some((xs, v)) => foldInternal(p, xs, f(initial, v), f)
         case None => (input, initial)
-    }
-
-    pub def and[a, b](
-        lhs: Parser[a],
-        rhs: Parser[b]
-    ): Parser[(a, b)] = input -> match input.lhs() {
-        case Some((xs, v)) => match xs.rhs() {
-            case Some((ys, u)) => Some((ys, (v, u)))
-            case None => None
-        }
-        case None => None
-    }
-
-    pub def then[a, b](
-        lhs: Parser[a],
-        rhs: a -> Parser[b]
-    ): Parser[b] = input -> match input.lhs() {
-        case Some((xs, v)) => {
-            let res = rhs(v);
-            res(xs)
-        }
-        case None => None
-    }
-
-    pub def or[a](
-        lhs: Parser[a],
-        rhs: Parser[a]
-    ): Parser[a] = input -> match input.lhs() {
-        case None => input.rhs()
-        case ret => ret
-    }
-
-    pub def delimit[a, b, c](
-        lhs: Parser[a],
-        mid: Parser[b],
-        rhs: Parser[c]
-    ): Parser[b] = lhs `skipLeft` mid `skipRight` rhs
-
-    pub def not[a](p: Parser[a]): Parser[()] = input -> match input.p() {
-        case Some(_) => None
-        case None => Some((input, ()))
     }
 
 }
