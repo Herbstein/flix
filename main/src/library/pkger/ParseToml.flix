@@ -48,6 +48,30 @@ namespace ParseToml {
         case KeyValuePair(List[String], SemanticToml)
     }
 
+    pub def serializeLines(input: List[TomlLine]): String = List.fold(
+        (i, l) -> i + match l {
+            case TableDef(k) => "[" + serializeKey(k) + "]"
+            case ArrayTable(k) => "[[" + serializeKey(k) + "]]"
+            case KeyValuePair(k, v) => serializeKey(k) + " = " + serializeSem(v)
+        } + Char.toString('\n'), "Lines print!" + Char.toString('\n'), input)
+
+    def serializeKey(input: List[String]): String = input |> String.intercalateChar('.')
+
+    def serializeSem(input: SemanticToml): String = match input {
+        case Table(map) => ???
+        case ArrayOfTables(list) => ???
+        case InlineTable(map) => ???
+        case ArrayV(list) => "[" + (list |> List.map(e -> serializeSem(e)) |> String.intercalate(", ")) + "]"
+        case StringV(str) => Char.toString('"') + str + Char.toString('"')
+        case IntV(int) => ???
+        case FloatV(str) => ???
+        case BoolV(bool) => ???
+        case OffsetDateTime(str) => ???
+        case LocalDateTime(str) => ???
+        case LocalDate(str) => ???
+        case LocalTime(str) => ???
+    }
+
     pub def serialize(input: ParsedToml): String = Map.foldWithKey(
         initial -> k -> v -> {
             initial + Char.toString('"')
@@ -61,14 +85,19 @@ namespace ParseToml {
         input
     )
 
+            
+
     def internalSerialize(input: InnerToml): String = match input {
         case StringVal(s) => Char.toString('"') + s + Char.toString('"')
+        case MapVal(t) => Char.toString('{') + serialize(t) + Char.toString('}')
         case _ => ???
     }
 
-
-    pub def parse(input: List[Char]): Option[ParsedToml] = input |> parseTomlLines() |>
-        Option.flatMap(match (_, tomlLines) -> parseHelper(tomlLines, Nil, Map.empty())) |>
+    pub def parse(input: List[Char]): Option[ParsedToml] & Impure = input |> parseTomlLines() |>
+        Option.flatMap(match (_, tomlLines) -> {
+            Console.printLine(serializeLines(tomlLines));
+            parseHelper(tomlLines, Nil, Map.empty())
+        }) |>
         Option.map(mapSem)
 
     /*pub enum InnerToml {
@@ -126,17 +155,21 @@ namespace ParseToml {
         input: List[TomlLine],
         table: List[String],
         outer: Map[String, SemanticToml]
-    ): Option[Map[String, SemanticToml]] = match input {
+    ): Option[Map[String, SemanticToml]] & Impure = match input {
         case Nil => Some(outer)
         case TableDef(key) :: xs => match List.reverse(key) {
             case last :: init =>
-                indexTable(List.reverse(init), outer) |>
-                Option.flatMap(t -> match Map.get(last, t) {
-                    case Some(_) =>
-                        // Multiple definitions of the same key are illegal.
-                        None
-                    case None => parseHelper(xs, key, outer)
-                }) 
+                indexTable(List.reverse(init), outer) |> Option.flatMap(
+                    inner -> match inner |> Map.get(last) {
+                        case Some(_) => None
+                        case None => {
+                            inner |>
+                                Map.insert(last, Table(Map.empty())) |>
+                                insertTable(init, outer) |>
+                                parseHelper(xs, key)
+                        }
+                    }
+                )
             case Nil =>
                 // Unreachable: It's a parse error to find a Table/ArrayOfTables definition without
                 // any keys
@@ -175,54 +208,42 @@ namespace ParseToml {
             )
     }
 
+    // Inserts inner at the position described by keys. If that's somehow impossible, the original
+    // map will be returned.
     def insertTable(
         keys: List[String],
         outer: Map[String, SemanticToml],
         inner: Map[String, SemanticToml]
     ): Map[String, SemanticToml] = match keys {
         case Nil => inner
-        case k :: xs => Map.update(v -> match v {
-            case Table(map) => Some(Table(insertTable(xs, map, inner)))
-            case ArrayOfTables(array) => match array {
-                case h :: tail => Some(ArrayOfTables(insertTable(xs, h, inner) :: tail))
-                case Nil =>
-                     // Unreachable: We never create an ArrayOfTables without adding an element to
-                     // it.
-                     None
+        case k :: ks => match outer |> Map.get(k) {
+                case None => Map.insert(k, Table(insertTable(ks, Map.empty(), inner)), outer)
+                case Some(Table(nested)) =>
+                    Map.update(_ -> Some(Table(insertTable(ks, nested, inner))), k, outer)
+                case Some(ArrayOfTables(nested)) => match nested {
+                    case x :: xs =>
+                        Map.update(_ ->
+                            Some(ArrayOfTables(insertTable(ks, x, inner) :: xs)),
+                            k, outer
+                        )
+                    case _ => outer
+                }
+                case _ => outer
             }
-            case _ =>
-                // Unreachable: If there was something other than Table/ArrayOfTables here,
-                // indexTable would have failed, and this wouldn't exists. If there was nothing,
-                // indexTable would have created a Table -> which would mean there is a table.
-                None
-        }, k, outer)
     }
     
     def indexTable(
         keys: List[String],
         outer: Map[String, SemanticToml]
-    ): Option[Map[String, SemanticToml]] =
-        keys |> List.fold((map, key) ->
-            map |> Option.flatMap(m -> 
-                match m |> Map.get(key) {
-                    case Some(st) => match st {
-                        case Table(innerMap) => Some(innerMap)
-                        case ArrayOfTables(array) => match array {
-                            case x :: xs =>
-                                // Arrays should be inverted until we create the final
-                                // Map[String, InnerToml] structure, so the last element is the one
-                                // on the top.
-                                Some(x)
-                            case Nil => 
-                                // Unreachable: We never create an Array of tables, without
-                                // inserting a Table in it.
-                                None
-                        }
-                        case _ => None
-                    }
-                    case None => ???
-                }
-            ), Some(outer))
+    ): Option[Map[String, SemanticToml]] & Impure = match keys {
+        case Nil => Some(outer)
+        case k :: ks => match outer |> Map.get(k) {
+            case Some(Table(t)) => indexTable(ks, t)
+            case Some(ArrayOfTables(l)) => ???
+            case None => Some(Map.empty())
+            case Some(_) => None
+        }
+    }
 
     // If the Table has not been made while beeing in the current Table, Error! This is _not_
     // currently correctly implemented.
@@ -245,13 +266,19 @@ namespace ParseToml {
         value: SemanticToml,
         acc: Map[String, SemanticToml]
     ): Option[Map[String, SemanticToml]] = match key { 
-        case k :: _ :: xs => 
+        case k :: x :: xs => 
             match acc |> Map.get(k) {
-                case Some(_) => {
-                    // As this table have been created before we have to reject it unless it's
+                case Some(inner) => {
+                    // As this table have been created before we should reject it unless it's
                     // marked as appendable.
-                    // TODO:
-                    None
+                    match inner {
+                        case Table(t) => insert(x :: xs, value, t) |> Option.map(
+                            updated -> acc |> Map.update(_ -> Some(Table(updated)), k))
+                        case ArrayOfTables(t) =>
+                            // TODO:
+                            ???
+                        case _ => None
+                    }
                 }
                 case None =>
                     insert(xs, value, Map.empty()) |> Option.map(updated -> 
@@ -276,7 +303,7 @@ namespace ParseToml {
     
     def parseTomlLines(): Parser[List[TomlLine]] =
         use Parser.{takeWhile, and, map, then};
-        (parseTomlLine() `and` takeWhile(takeWhile(parseNewLine()).then(_ -> parseTomlLine())))
+        (parseTomlLine() `and` takeWhile(parseNewLine().then(_ -> parseTomlLine())))
             .map(match (first, rest) -> first :: rest)
 
     def parseTomlLine(): Parser[TomlLine] =
@@ -311,7 +338,9 @@ namespace ParseToml {
     def parseKeys(): Parser[List[String]] =
         use Parser.{and, tag, takeWhile, map};
         (parseKey() `and`
-            takeWhile((ws() `and` tag('.') `and` ws() `and` parseKey()).map(match (_, k) -> k))
+            takeWhile(
+                (ws() `and` (tag('.')) `and` (ws()) `and` parseKey())
+                    .map(match (_, k) -> k))
         ).map(match (lhs, rhs) -> lhs :: rhs)
 
     pub def parseKey(): Parser[String] = {
@@ -331,7 +360,9 @@ namespace ParseToml {
 
     def parseBareKey(): Parser[String] = {
         use Parser.{takeWhile, or, tag, map};
-        takeWhile(parseDigit() `or` parseLetter() `or` tag('-') `or` tag('_')).map(List.toString)
+        takeWhile(parseDigit() `or` parseLetter() `or` tag('-') `or` tag('_'))
+            .notNil()
+            .map(List.toString)
     }
 
     def parseString(): Parser[String] = {
@@ -345,7 +376,7 @@ namespace ParseToml {
 
     def parseLiteralString(): Parser[String] = {
         use Parser.{delimit, char, filter, takeWhile, tag, map};
-        let quote = tag('\'');
+        let quote = tag(Char.fromInt32(39));
         delimit(quote, takeWhile(char().filter(c -> c != '\'' && !c.isCR() && !c.isLF())), quote).map(List.toString)
     }
 
@@ -384,11 +415,11 @@ namespace ParseToml {
         case '\\' :: xs => match xs {
             case 'u' :: u1 :: u2 :: u3 :: u4 :: ys => ???
             case 'U' :: u1 :: u2 :: u3 :: u4 :: u5 :: u6 :: u7 :: u8 :: ys => ???
-            case 'b' :: ys => Some((ys, ???))
-            case 't' :: ys => Some((ys, '\t'))
-            case 'n' :: ys => Some((ys, '\n'))
-            case 'f' :: ys => Some((ys, ???))
-            case 'r' :: ys => Some((ys, '\r'))
+            case 'b' :: ys => Some((ys, Char.fromInt32(8)))
+            case 't' :: ys => Some((ys, Char.fromInt32(9)))
+            case 'n' :: ys => Some((ys, Char.fromInt32(10)))
+            case 'f' :: ys => Some((ys, Char.fromInt32(12)))
+            case 'r' :: ys => Some((ys, Char.fromInt32(13)))
             case '"' :: ys => Some((ys, '"'))
             case '\\' :: ys => Some((ys, '\\'))
             case _ => None
@@ -398,6 +429,12 @@ namespace ParseToml {
         case Nil => None
     }
 
+    def notNil(
+        p: Parser[List[a]]
+    ): Parser[List[a]] =
+        use Parser.filter;
+        p.filter(l -> !List.isEmpty(l))
+
     def newLine(): Parser[()] = {
         use Parser.{char, filter, or, and, map};
         (char().filter(isCR) `and` char().filter(isLF))
@@ -406,8 +443,8 @@ namespace ParseToml {
     }
 
     def ws(): Parser[()] = {
-        use Parser.{tag, takeWhile, or, map};
-        takeWhile(tag(' ') `or` tag('\t')).map( _ -> ())
+        use Parser.{tag, takeWhile, or, map, not, filter, char};
+        takeWhile(tag(' ') `or` char().filter(c -> c == Char.fromInt32(9))).map( _ -> ())
     }
 
     def isCR(c: Char): Bool = c == Char.fromInt32(13)
@@ -416,19 +453,91 @@ namespace ParseToml {
 
     namespace Test {
         @test
-        pub def simpleTest(): Bool =
+        pub def simpleTest(): Bool & Impure =
             use ParseToml.{parse, InnerToml, serialize};
 
-            let parsed = parse('a' :: ' ' :: '=' :: ' ' :: '"' :: 'b' :: '"' :: Nil);
+            Console.printLine("");
+            Console.printLine("simpleTest");
+
+            let parsed = ParseToml.parse('a' :: ' ' :: '=' :: ' ' :: '"' :: 'b' :: '"' :: Nil);
             match parsed {
                 case None => false
                 case Some(outerToml) => match Map.get("a", outerToml) {
                     case None => false
                     case Some(innerToml) => match innerToml {
-                        case InnerToml.StringVal(s) => s == "b"
+                        case ParseToml/InnerToml.StringVal(s) => s == "b"
                         case _ => false
                     }
                 }
             }
+
+        @test
+        pub def tableTest(): Bool & Impure =
+            use ParseToml.{parse, InnerToml, serialize};
+            Console.printLine("");
+            Console.printLine("tableTest");
+
+            let parsed = ParseToml.parse(String.toList("[a]"));
+
+            match parsed {
+                case Some(outer) => {
+                    Console.printLine(ParseToml.serialize(outer));
+                    match outer |> Map.get("a") {
+                        case Some(ParseToml/InnerToml.MapVal(_)) => true
+                        case _ => false
+                    }
+                }
+                case _ => false
+            }
+
+        @test
+        pub def moreComplicated(): Bool & Impure = {
+            use ParseToml.{parse, InnerToml, serialize};
+            Console.printLine("");
+            Console.printLine("moreComplicated");
+            let str = String.intercalateChar(Char.fromInt32(10),
+                "[a]" ::
+                "a = 'a'" :: Nil
+            );
+            //Console.printLine(str);
+            let parsed = ParseToml.parse(String.toList(str));
+            match parsed {
+                case Some(outer) => {
+                    Console.printLine(ParseToml.serialize(outer));
+                    match Map.get("a", outer) {
+                        case Some(ParseToml/InnerToml.MapVal(table)) => match Map.get("a", table) {
+                            case Some(ParseToml/InnerToml.StringVal("a")) => true
+                            case _ => {Console.printLine("inner"); false}
+                        }
+                        case _ => {Console.printLine("table"); false}
+                    }
+                }
+                case _ => false
+            }
+        }
+
+        @test
+        pub def arrayTest(): Bool & Impure = {
+            use ParseToml.{parse, InnerToml, serialize};
+            let str = String.intercalateChar(Char.fromInt32(10),
+                "[a]" ::
+                "a = ['a', 'a']" :: Nil
+            );
+            //Console.printLine(str);
+            let parsed = ParseToml.parse(String.toList(str));
+            match parsed {
+                case Some(outer) => {
+                    Console.printLine(ParseToml.serialize(outer));
+                    match Map.get("a", outer) {
+                        case Some(ParseToml/InnerToml.MapVal(table)) => match Map.get("a", table) {
+                            case Some(ParseToml/InnerToml.ArrayVal(ParseToml/InnerToml.StringVal("a") :: ParseToml/InnerToml.StringVal("a") :: Nil)) => true
+                            case _ => {Console.printLine("inner"); false}
+                        }
+                        case _ => {Console.printLine("table"); false}
+                    }
+                }
+                case _ => false
+            }
+        }
     }
 }
