@@ -72,7 +72,7 @@ namespace Parser {
     /// ```
     ///
     /// ```
-    /// String.toList("ab") |> tag('a') `assertEq!` Some((b :: Nil, 'a'))
+    /// String.toList("ab") |> tag('a') `assertEq!` Some(('b' :: Nil, 'a'))
     /// ```
     pub def tag(c: Char): Parser[Char] = char().filter(d -> d == c)
 
@@ -148,7 +148,7 @@ namespace Parser {
     /// ```
     ///
     /// ```
-    /// String.toList("zz") |> (tag('a') `or` tog('b')) `assertEq!` None
+    /// String.toList("zz") |> (tag('a') `or` tag('b')) `assertEq!` None
     /// ```
     pub def or[a](
         lhs: Parser[a],
@@ -167,7 +167,7 @@ namespace Parser {
     /// ```
     /// let parser = (char() `and` char())
     ///     .then(match (lhs, rhs) -> tag('+')
-    ///     .map(v -> lhs :: v :: rhs);
+    ///     .map(v -> lhs :: v :: rhs :: Nil));
     /// String.toList("12+") |> parser `assertEq!` Some((Nil, '1' :: '+' :: '2' :: Nil))
     /// ```
     pub def then[a, b](
@@ -223,7 +223,7 @@ namespace Parser {
     /// # Examples
     ///
     /// ```
-    /// String.toList("a") |> skip(char()) `assertEq` Some((Nil, ()))
+    /// String.toList("a") |> skip(char()) `assertEq!` Some((Nil, ()))
     /// ```
     pub def skip[a](
         p: Parser[a]
@@ -240,7 +240,7 @@ namespace Parser {
     /// ```
     /// String.toList("abc") |> (char() `skipLeft` char())
     /// `assertEq!`
-    /// Some(('c' :: Nil, 'b' :: Nil))
+    /// Some(('c' :: Nil, 'b'))
     /// ```
     ///
     /// ```
@@ -262,7 +262,7 @@ namespace Parser {
     /// ```
     /// String.toList("abc") |> (char() `skipRight` char())
     /// `assertEq!`
-    /// Some(('c' :: Nil, 'a' :: Nil))
+    /// Some(('c' :: Nil, 'a'))
     /// ```
     ///
     /// ```
@@ -330,22 +330,22 @@ namespace Parser {
     ///
     /// ```
     /// String.toList("ababa") |> seperatedAny(tag('a'), tag('b'))
-    /// `assertEq`
+    /// `assertEq!`
     /// Some((Nil, 'a' :: 'a' :: 'a' :: Nil))
     /// ```
     ///
     /// ```
     /// String.toList("abab") |> seperatedAny(tag('a'), tag('b'))
-    /// `assertEq`
+    /// `assertEq!`
     /// Some(('b' :: Nil, 'a' :: 'a' :: Nil))
     /// ```
     ///
     /// ```
-    /// String.toList("a") |> seperatedAny(tag('a'), tag('b')) `assertEq` Some((Nil, 'a' :: Nil))
+    /// String.toList("a") |> seperatedAny(tag('a'), tag('b')) `assertEq!` Some((Nil, 'a' :: Nil))
     /// ```
     ///
     /// ```
-    /// String.toList("b") |> seperatedAny(tag('a'), tag('b')) `assertEq` Some(('b' :: Nil, Nil))
+    /// String.toList("b") |> seperatedAny(tag('a'), tag('b')) `assertEq!` Some(('b' :: Nil, Nil))
     /// ```
     pub def seperatedAny[a, b](
         p: Parser[a],
