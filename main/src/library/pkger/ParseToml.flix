@@ -90,6 +90,11 @@ namespace ParseToml {
     def internalSerialize(input: InnerToml): String = match input {
         case StringVal(s) => Char.toString('"') + s + Char.toString('"')
         case MapVal(t) => Char.toString('{') + serialize(t) + Char.toString('}')
+        case ArrayVal(a) =>
+            a |> List.fold((i, rest) -> i +
+                internalSerialize(rest) +
+                Char.toString(',') + Char.toString(' '), "[") +
+            Char.toString(']')
         case _ => ???
     }
 
@@ -298,19 +303,14 @@ namespace ParseToml {
     }
     
     def parseTomlLines(): Parser[List[TomlLine]] =
-        use Parser.{tailSeperatedAny, takeMany};
-        tailSeperatedAny(parseTomlLine(), takeMany(parseNewLine()))
+        use Parser.{tailSeperatedAny, takeMany, takeAny, and};
+        tailSeperatedAny(parseTomlLine(), takeAny(ws()) `and` takeMany(newLine()))
 
     def parseTomlLine(): Parser[TomlLine] =
         use Parser.{or, map, then};
         parseTable() `or`
         parseArrayOfTables() `or`
         parseKeyValue()
-
-    def parseNewLine(): Parser[()] = {
-        use Parser.{skip, skipRight, takeAny};
-        takeAny(ws()).skip() `skipRight` newLine()
-    }
 
     def parseTable(): Parser[TomlLine] = {
         use Parser.{delimit, tag, map};
@@ -365,14 +365,22 @@ namespace ParseToml {
         (tag('f') `and` tag('a') `and` tag('l') `and` tag('s') `and` tag('e')).map(_ -> BoolV(false))
 
     
-    def parseArray(): Parser[SemanticToml] =
+    pub def parseArray(): Parser[SemanticToml] =
         use Parser.{delimit, tag, and, map, tailSeperatedAny, or, takeAny};
 
         delimit(
             tag('[') `and` takeAny(ws() `or` newLine()),
-            tailSeperatedAny((input -> input |> parseValue()), takeAny(ws() `or` newLine()) `and` tag(',')),
+            tailSeperatedAny((input -> input |> parseValue()), takeAny(ws() `or` newLine()) `and` tag(',') `and` takeAny(ws() `or` newLine())),
             takeAny(ws() `or` newLine()) `and` tag(']')
         ).map(ArrayV)
+
+    @test
+    def testParseArray1(): Bool =
+        String.toList("['a', 'a']") |> parseArray() == Some((Nil, ArrayV(StringV("a") :: StringV("a") :: Nil)))
+
+    @test
+    def testParseArray2(): Bool =
+        String.toList("[]") |> parseArray() == Some((Nil, ArrayV(Nil)))
 
     def parseBareKey(): Parser[String] = {
         use Parser.{takeMany, or, tag, map};
